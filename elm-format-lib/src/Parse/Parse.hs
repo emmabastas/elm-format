@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module Parse.Parse (parse, parseModule, parseDeclarations, parseExpressions) where
 
-import qualified Text.Parsec.Error as Parsec
+import qualified Text.Parsec.Adapter as Parsec
 
 import AST.V0_16
 import AST.Module (Module)
@@ -17,7 +17,7 @@ import qualified Reporting.Region as R
 import qualified Reporting.Error.Syntax as Error
 import qualified Reporting.Result as Result
 import Parse.IParser
-import Text.Parsec (eof)
+import Text.Parsec.Adapter (eof)
 
 
 parseModule :: ElmVersion -> String -> Result.Result () Error.Error (Module [UppercaseIdentifier] (ASTNS Located [UppercaseIdentifier] 'TopLevelNK))

@@ -1,6 +1,6 @@
 module Parse.IParser where
 
-import Text.Parsec.Prim (Parser)
+import Text.Parsec.Adapter (Parser)
 
 
 type IParser = Parser
