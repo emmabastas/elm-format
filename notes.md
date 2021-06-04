@@ -2,6 +2,10 @@
 
 ## Potential problems
 
+## Under which section to put new Reporting.Annotation.New module?
+
+Currently in other modules, should it be somewhere else?
+
 ### Changing behavior of adapter module changes behavior of unit tests
 
 ### Tests that relied on legacy parsec functions now use new ones.
