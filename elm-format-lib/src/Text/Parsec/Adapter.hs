@@ -4,8 +4,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 
 module Text.Parsec.Adapter
-  -- Text.Parsec.Prim
   ( Parser
+  -- Text.Parsec.Prim
   , (<?>)
   , (<|>)
   , lookAhead
@@ -56,7 +56,6 @@ module Text.Parsec.Adapter
   , errorPos
   , errorMessages
   -- Text.Parsec.Indent
-  , IndentParser
   , runIndent
   , block
   , indented
@@ -66,27 +65,122 @@ module Text.Parsec.Adapter
 
 import qualified Control.Applicative as Applicative ( Applicative(..), Alternative(..) )
 import Control.Monad (MonadPlus(..))
-import qualified Control.Monad.State as State
+import qualified Control.Monad.State as Monad
 import qualified Control.Monad.Fail as Fail
 
 import qualified Parse.Primitives as EP
-import Parse.State (State)
+import Parse.State (State(..))
+
+import qualified Text.Parsec as P
+import qualified Text.Parsec.Pos as P
+import qualified Text.Parsec.Error as P
+import qualified Text.Parsec.Indent as P
 
 import Data.List (nub, sort)
 import Data.Typeable (Typeable)
+
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Internal as B
+import Foreign.Ptr (plusPtr, minusPtr)
+import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
+import Codec.Binary.UTF8.String (encode, decode)
+
+
+data Parser a
+  = Parser (EP.Parser ParseError a)
+
+
+type ParsecInput = String
+type ParsecParser a = P.ParsecT ParsecInput State (Monad.State SourcePos) a
+
+
+parserSec :: ParsecParser a -> Parser a
+parserSec p =
+  Parser $ EP.Parser $ \s cok eok cerr eerr ->
+    let
+      row = fromIntegral $ EP._row s
+      col = fromIntegral $ EP._col s
+      sourcePos = newPos "" row col
+    in
+    case Monad.evalState (P.runParsecT p (stateRet s)) sourcePos of
+      P.Consumed x ->
+        case Monad.evalState x sourcePos of
+          P.Ok output state _ ->
+            cok output (stateSec state)
+
+          P.Error parseError ->
+            let
+              sourcePos = P.errorPos parseError
+              row = fromIntegral $ P.sourceLine sourcePos
+              col = fromIntegral $ P.sourceColumn sourcePos
+            in
+            cerr row col (\_ _ -> parseError)
+
+      P.Empty x ->
+        case Monad.evalState x sourcePos of
+          P.Ok output state _ ->
+            eok output (stateSec state)
+
+          P.Error parseError ->
+            let
+              sourcePos = P.errorPos parseError
+              row = fromIntegral $ P.sourceLine sourcePos
+              col = fromIntegral $ P.sourceColumn sourcePos
+            in
+            eerr row col (\_ _ -> parseError)
+
+
+parserRet :: Parser a -> ParsecParser a
+parserRet (Parser (EP.Parser p )) =
+  P.mkPT $ \state ->
+    let
+      cok v s =
+        let s' = stateRet s in
+        return $ P.Consumed $ return $ P.Ok v s' (unknownError s')
+
+      eok v s =
+        let s' = stateRet s in
+        return $ P.Empty $ return $ P.Ok v s' (unknownError s')
+
+      cerr row col toError =
+        return $ P.Consumed $ return $ P.Error $ toError row col
+
+      eerr row col toError =
+        return $ P.Empty $ return $ P.Error $ toError row col
+    in
+    p (stateSec state) cok eok cerr eerr
+
+
+stateSec :: P.State ParsecInput State -> EP.State
+stateSec (P.State source sourcePos (State newline)) =
+  let
+    (B.PS fptr offset length) = B.pack $ encode source
+    pos = plusPtr (unsafeForeignPtrToPtr fptr) offset
+    end = plusPtr pos length
+    row = fromIntegral $ P.sourceLine sourcePos
+    col = fromIntegral $ P.sourceColumn sourcePos
+  in
+  EP.State fptr pos end 0 row col
+
+
+stateRet :: EP.State -> P.State ParsecInput State
+stateRet (EP.State fptr pos end indent row col) =
+  let
+    offset = minusPtr (unsafeForeignPtrToPtr fptr) pos
+    length = minusPtr end pos
+    source = decode $ B.unpack (B.PS fptr offset length)
+    sourcePos = P.newPos "" (fromIntegral row) (fromIntegral col)
+    userState = State []
+  in
+  P.State source sourcePos userState
 
 
 
 -- Text.Parsec.Prim
 
 
-unknownError :: EP.Row -> EP.Col -> ParseError
-unknownError row col =
-  newErrorUnknown $ newPos "" row col
-
-
-data Parser a
-  = Parser (EP.Parser ParseError a)
+unknownError :: P.State s u -> ParseError
+unknownError = P.unknownError
 
 
 instance Functor Parser where
@@ -115,22 +209,8 @@ instance Fail.MonadFail Parser where
 
 
 instance MonadPlus Parser where
-  mzero = parserZero
-  mplus = parserPlus
-
-
-parserZero :: Parser a
-parserZero =
-  Parser $ EP.Parser $ \state _ _ _ eerr ->
-    let
-      (EP.State _ _ _ _ row col) = state
-    in
-    eerr row col unknownError
-
-
-parserPlus :: Parser a -> Parser a -> Parser a
-parserPlus (Parser p) (Parser q) =
-  Parser $ EP.oneOf (\row col -> undefined) [p, q]
+  mzero = undefined
+  mplus = undefined
 
 
 infixr 1 <|>
@@ -142,38 +222,45 @@ infix  0 <?>
 
 
 (<?>) :: Parser a -> String -> Parser a
-(<?>) = undefined
+(<?>) p s = parserSec $ (flip P.label) s $ parserRet p
 
 
 lookAhead :: Parser a -> Parser a
-lookAhead = undefined
+lookAhead = parserSec . P.lookAhead . parserRet
 
 
 try :: Parser a -> Parser a
-try (Parser (EP.Parser parser)) =
-  Parser $ EP.Parser $ \s cok eok _ err ->
-    parser s cok eok err err
+try =
+  parserSec . P.try . parserRet
 
 many :: Parser a -> Parser [a]
-many = undefined
+many =
+  parserSec . P.many . parserRet
+
 
 skipMany ::Parser a -> Parser ()
 skipMany = undefined
 
-runParserT :: Parser a -> u -> SourceName -> s -> m (Either ParseError a)
-runParserT = undefined
+runParserT :: Parser a -> State -> SourceName -> ParsecInput -> Monad.State SourcePos (Either ParseError a)
+runParserT parser userState sourceName state =
+  P.runParserT (parserRet parser) userState sourceName state
+
 
 getPosition :: Parser SourcePos
 getPosition = undefined
 
+
 getInput :: Parser s
 getInput = undefined
+
 
 setInput :: s -> Parser ()
 setInput = undefined
 
+
 getState :: Parser State
 getState = undefined
+
 
 updateState :: (State -> State) -> Parser ()
 updateState = undefined
@@ -196,7 +283,8 @@ skipMany1 :: Parser a -> Parser ()
 skipMany1 = undefined
 
 option :: a -> Parser a -> Parser a
-option = undefined
+option a p =
+  parserSec $ P.option a $ parserRet p
 
 optionMaybe :: Parser a -> Parser (Maybe a)
 optionMaybe = undefined
@@ -262,153 +350,74 @@ string = undefined
 -- Text.Parsec.Pos
 
 
-type SourceName = String
+
+type SourceName = P.SourceName
 
 
-data SourcePos = SourcePos SourceName !EP.Row !EP.Col
+type Line = P.Line
 
 
-newPos :: String -> EP.Row -> EP.Col -> SourcePos
-newPos =
-  SourcePos
+type Column = P.Column
 
 
-sourceLine :: SourcePos -> Int
-sourceLine (SourcePos _ row _) =
-  fromIntegral row
+type SourcePos = P.SourcePos
 
 
-sourceColumn :: SourcePos -> Int
-sourceColumn (SourcePos _ _ col) =
-  fromIntegral col
+newPos :: String -> Line -> Column -> SourcePos
+newPos = P.newPos
 
 
-instance Show SourcePos where
-  show (SourcePos name line column)
-    | null name = showLineColumn
-    | otherwise = "\"" ++ name ++ "\" " ++ showLineColumn
-    where
-      showLineColumn    = "(line " ++ show line ++
-                          ", column " ++ show column ++
-                          ")"
+sourceLine :: SourcePos -> Line
+sourceLine = P.sourceLine
+
+
+sourceColumn :: SourcePos -> Column
+sourceColumn = P.sourceColumn
+
 
 
 
 -- Text.Parsec.Error
 
 
-data Message
-  = SysUnExpect !String -- @ library generated unexpect
-  | UnExpect    !String -- @ unexpected something
-  | Expect      !String -- @ expecting something
-  | Message     !String -- @ raw message
-  deriving ( Typeable )
+
+type ParseError = P.ParseError
 
 
-instance Enum Message where
-    fromEnum (SysUnExpect _) = 0
-    fromEnum (UnExpect    _) = 1
-    fromEnum (Expect      _) = 2
-    fromEnum (Message     _) = 3
-    toEnum _ = error "toEnum is undefined for Message"
-
-
-instance Eq Message where
-    m1 == m2 = fromEnum m1 == fromEnum m2
-
-
-instance Ord Message where
-    compare msg1 msg2 = compare (fromEnum msg1) (fromEnum msg2)
-
-
-messageString :: Message -> String
-messageString (SysUnExpect s) = s
-messageString (UnExpect    s) = s
-messageString (Expect      s) = s
-messageString (Message     s) = s
-
-
-data ParseError = ParseError !SourcePos [Message]
+type Message = P.Message
 
 
 newErrorUnknown :: SourcePos -> ParseError
-newErrorUnknown pos
-    = ParseError pos []
+newErrorUnknown = P.newErrorUnknown
 
 
 errorPos :: ParseError -> SourcePos
-errorPos = undefined
+errorPos = P.errorPos
 
 errorMessages :: ParseError -> [Message]
-errorMessages = undefined
-
-
-instance Show ParseError where
-    show err
-        = show (errorPos err) ++ ":" ++
-          showErrorMessages "or" "unknown parse error"
-                            "expecting" "unexpected" "end of input"
-                           (errorMessages err)
+errorMessages = P.errorMessages
 
 
 showErrorMessages ::
-    String -> String -> String -> String -> String -> [Message] -> String
-showErrorMessages msgOr msgUnknown msgExpecting msgUnExpected msgEndOfInput msgs
-    | null msgs = msgUnknown
-    | otherwise = concat $ map ("\n"++) $ clean $
-                 [showSysUnExpect,showUnExpect,showExpect,showMessages]
-    where
-      (sysUnExpect,msgs1) = span ((SysUnExpect "") ==) msgs
-      (unExpect,msgs2)    = span ((UnExpect    "") ==) msgs1
-      (expect,messages)   = span ((Expect      "") ==) msgs2
-
-      showExpect      = showMany msgExpecting expect
-      showUnExpect    = showMany msgUnExpected unExpect
-      showSysUnExpect | not (null unExpect) ||
-                        null sysUnExpect = ""
-                      | null firstMsg    = msgUnExpected ++ " " ++ msgEndOfInput
-                      | otherwise        = msgUnExpected ++ " " ++ firstMsg
-          where
-              firstMsg  = messageString (head sysUnExpect)
-
-      showMessages      = showMany "" messages
-
-      -- helpers
-      showMany pre msgs3 = case clean (map messageString msgs3) of
-                            [] -> ""
-                            ms | null pre  -> commasOr ms
-                               | otherwise -> pre ++ " " ++ commasOr ms
-
-      commasOr []       = ""
-      commasOr [m]      = m
-      commasOr ms       = commaSep (init ms) ++ " " ++ msgOr ++ " " ++ last ms
-
-      commaSep          = separate ", " . clean
-
-      separate   _ []     = ""
-      separate   _ [m]    = m
-      separate sep (m:ms) = m ++ sep ++ separate sep ms
-
-      clean             = nub . filter (not . null)
+  String -> String -> String -> String -> String -> [Message] -> String
+showErrorMessages = P.showErrorMessages
 
 
 
 -- Text.Parsec.Indent
 
 
-type IndentParser a = Parser a
+runIndent :: SourceName -> Monad.State SourcePos a -> a
+runIndent = P.runIndent
 
-runIndent :: SourceName -> State.State SourcePos a -> a
-runIndent = undefined
-
-block :: IndentParser a -> IndentParser [a]
+block :: Parser a -> Parser [a]
 block = undefined
 
-indented :: IndentParser ()
+indented :: Parser ()
 indented = undefined
 
-checkIndent :: IndentParser ()
+checkIndent :: Parser ()
 checkIndent = undefined
 
-withPos :: IndentParser a -> IndentParser a
+withPos :: Parser a -> Parser a
 withPos = undefined
