@@ -1,0 +1,173 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module ElmFormat.ImportInfo (ImportInfo(..), fromModule, fromImports) where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import AST.V0_16
+<span class="lineno">    4 </span>import AST.Listing (Listing(..), CommentedMap)
+<span class="lineno">    5 </span>import Elm.Utils ((|&gt;))
+<span class="lineno">    6 </span>
+<span class="lineno">    7 </span>import AST.Module (Module, ImportMethod(..), DetailedListing(..))
+<span class="lineno">    8 </span>import qualified AST.Module
+<span class="lineno">    9 </span>import Data.Coapplicative
+<span class="lineno">   10 </span>import qualified Data.Bimap as Bimap
+<span class="lineno">   11 </span>import qualified Data.Map.Strict as Dict
+<span class="lineno">   12 </span>import qualified Data.Maybe as Maybe
+<span class="lineno">   13 </span>import qualified Data.Set as Set
+<span class="lineno">   14 </span>import qualified ElmFormat.KnownContents as KnownContents
+<span class="lineno">   15 </span>import ElmFormat.KnownContents (KnownContents)
+<span class="lineno">   16 </span>
+<span class="lineno">   17 </span>data ImportInfo ns =
+<span class="lineno">   18 </span>    ImportInfo
+<span class="lineno">   19 </span>        { <span class="istickedoff"><span class="decl"><span class="istickedoff">_exposed</span></span></span> :: Dict.Map LocalName ns
+<span class="lineno">   20 </span>        , <span class="istickedoff"><span class="decl"><span class="istickedoff">_aliases</span></span></span> :: Bimap.Bimap ns ns
+<span class="lineno">   21 </span>        , <span class="istickedoff"><span class="decl"><span class="istickedoff">_directImports</span></span></span> :: Set.Set ns
+<span class="lineno">   22 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">_ambiguous</span></span></span> :: Dict.Map LocalName [ns]
+<span class="lineno">   23 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">_unresolvedExposingAll</span></span></span> :: Set.Set ns -- any modules with exposing(..) and we didn't know the module contents
+<span class="lineno">   24 </span>        }
+<span class="lineno">   25 </span>    deriving <span class="decl"><span class="nottickedoff">Show</span></span>
+<span class="lineno">   26 </span>
+<span class="lineno">   27 </span>
+<span class="lineno">   28 </span>fromModule ::
+<span class="lineno">   29 </span>    KnownContents
+<span class="lineno">   30 </span>    -&gt; Module [UppercaseIdentifier] decl
+<span class="lineno">   31 </span>    -&gt; ImportInfo [UppercaseIdentifier]
+<span class="lineno">   32 </span><span class="decl"><span class="istickedoff">fromModule knownContents modu =</span>
+<span class="lineno">   33 </span><span class="spaces">    </span><span class="istickedoff">fromImports knownContents (fmap extract $ extract $ AST.Module.imports $ modu)</span></span>
+<span class="lineno">   34 </span>
+<span class="lineno">   35 </span>
+<span class="lineno">   36 </span>fromImports ::
+<span class="lineno">   37 </span>    KnownContents
+<span class="lineno">   38 </span>    -&gt; Dict.Map [UppercaseIdentifier] ImportMethod
+<span class="lineno">   39 </span>    -&gt; ImportInfo [UppercaseIdentifier]
+<span class="lineno">   40 </span><span class="decl"><span class="istickedoff">fromImports knownContents rawImports =</span>
+<span class="lineno">   41 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   42 </span><span class="spaces">        </span><span class="istickedoff">defaultImports :: Dict.Map [UppercaseIdentifier] ImportMethod</span>
+<span class="lineno">   43 </span><span class="spaces">        </span><span class="istickedoff">defaultImports =</span>
+<span class="lineno">   44 </span><span class="spaces">            </span><span class="istickedoff">Dict.fromList $</span>
+<span class="lineno">   45 </span><span class="spaces">                </span><span class="istickedoff">fmap (\(m, i) -&gt; (fmap UppercaseIdentifier m, ImportMethod Nothing (C <span class="nottickedoff">([], [])</span> i)))</span>
+<span class="lineno">   46 </span><span class="spaces">                </span><span class="istickedoff">[ ( [ &quot;Basics&quot; ], OpenListing <span class="nottickedoff">(C ([], []) ())</span> )</span>
+<span class="lineno">   47 </span><span class="spaces">                </span><span class="istickedoff">, ( [ &quot;List&quot; ], ClosedListing )</span>
+<span class="lineno">   48 </span><span class="spaces">                </span><span class="istickedoff">, ( [ &quot;Maybe&quot; ]</span>
+<span class="lineno">   49 </span><span class="spaces">                  </span><span class="istickedoff">, ExplicitListing</span>
+<span class="lineno">   50 </span><span class="spaces">                      </span><span class="istickedoff">(DetailedListing mempty <span class="nottickedoff">mempty</span> $</span>
+<span class="lineno">   51 </span><span class="spaces">                          </span><span class="istickedoff">Dict.fromList</span>
+<span class="lineno">   52 </span><span class="spaces">                              </span><span class="istickedoff">[ ( UppercaseIdentifier &quot;Maybe&quot;</span>
+<span class="lineno">   53 </span><span class="spaces">                                </span><span class="istickedoff">, C <span class="nottickedoff">([], [])</span> $ C <span class="nottickedoff">[]</span> $</span>
+<span class="lineno">   54 </span><span class="spaces">                                  </span><span class="istickedoff">ExplicitListing (Dict.fromList</span>
+<span class="lineno">   55 </span><span class="spaces">                                                   </span><span class="istickedoff">[ (UppercaseIdentifier &quot;Nothing&quot;, C <span class="nottickedoff">([], [])</span> <span class="nottickedoff">()</span>)</span>
+<span class="lineno">   56 </span><span class="spaces">                                                   </span><span class="istickedoff">, (UppercaseIdentifier &quot;Just&quot;, C <span class="nottickedoff">([], [])</span> <span class="nottickedoff">()</span>)</span>
+<span class="lineno">   57 </span><span class="spaces">                                                   </span><span class="istickedoff">]) <span class="nottickedoff">False</span>)]</span>
+<span class="lineno">   58 </span><span class="spaces">                      </span><span class="istickedoff">)</span>
+<span class="lineno">   59 </span><span class="spaces">                      </span><span class="istickedoff"><span class="nottickedoff">False</span></span>
+<span class="lineno">   60 </span><span class="spaces">                  </span><span class="istickedoff">)</span>
+<span class="lineno">   61 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">   62 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   63 </span><span class="spaces">        </span><span class="istickedoff">imports = Dict.union rawImports defaultImports -- NOTE: this MUST prefer rawImports when there is a duplicate key</span>
+<span class="lineno">   64 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   65 </span><span class="spaces">        </span><span class="istickedoff">-- these are things we know will get exposed for certain modules when we see &quot;exposing (..)&quot;</span>
+<span class="lineno">   66 </span><span class="spaces">        </span><span class="istickedoff">-- only things that are currently useful for Elm 0.19 upgrade are included</span>
+<span class="lineno">   67 </span><span class="spaces">        </span><span class="istickedoff">moduleContents :: [UppercaseIdentifier] -&gt; [LocalName]</span>
+<span class="lineno">   68 </span><span class="spaces">        </span><span class="istickedoff">moduleContents moduleName =</span>
+<span class="lineno">   69 </span><span class="spaces">            </span><span class="istickedoff">case (\(UppercaseIdentifier x) -&gt; x) &lt;$&gt; moduleName of</span>
+<span class="lineno">   70 </span><span class="spaces">                </span><span class="istickedoff">[ &quot;Basics&quot; ] -&gt;</span>
+<span class="lineno">   71 </span><span class="spaces">                    </span><span class="istickedoff">[ VarName $ LowercaseIdentifier &quot;identity&quot;</span>
+<span class="lineno">   72 </span><span class="spaces">                    </span><span class="istickedoff">]</span>
+<span class="lineno">   73 </span><span class="spaces">                </span><span class="istickedoff">[ &quot;Html&quot;, &quot;Attributes&quot; ] -&gt;</span>
+<span class="lineno">   74 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">[ VarName $ LowercaseIdentifier &quot;style&quot;</span></span>
+<span class="lineno">   75 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">]</span></span>
+<span class="lineno">   76 </span><span class="spaces">                </span><span class="istickedoff">[ &quot;List&quot; ] -&gt;</span>
+<span class="lineno">   77 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">[ VarName $ LowercaseIdentifier &quot;filterMap&quot;</span></span>
+<span class="lineno">   78 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">]</span></span>
+<span class="lineno">   79 </span><span class="spaces">                </span><span class="istickedoff">[ &quot;Maybe&quot; ] -&gt;</span>
+<span class="lineno">   80 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">[ CtorName $ UppercaseIdentifier &quot;Nothing&quot;</span></span>
+<span class="lineno">   81 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">, CtorName $ UppercaseIdentifier &quot;Just&quot;</span></span>
+<span class="lineno">   82 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">]</span></span>
+<span class="lineno">   83 </span><span class="spaces">                </span><span class="istickedoff">_ -&gt; KnownContents.get <span class="nottickedoff">moduleName</span> knownContents |&gt; Maybe.fromMaybe []</span>
+<span class="lineno">   84 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   85 </span><span class="spaces">        </span><span class="istickedoff">getExposed moduleName (ImportMethod _ (C _ listing)) =</span>
+<span class="lineno">   86 </span><span class="spaces">            </span><span class="istickedoff">Dict.fromList $ fmap (flip (,) moduleName) $</span>
+<span class="lineno">   87 </span><span class="spaces">            </span><span class="istickedoff">case listing of</span>
+<span class="lineno">   88 </span><span class="spaces">                </span><span class="istickedoff">ClosedListing -&gt; []</span>
+<span class="lineno">   89 </span><span class="spaces">                </span><span class="istickedoff">OpenListing _ -&gt;</span>
+<span class="lineno">   90 </span><span class="spaces">                    </span><span class="istickedoff">moduleContents moduleName</span>
+<span class="lineno">   91 </span><span class="spaces">                </span><span class="istickedoff">ExplicitListing details _ -&gt;</span>
+<span class="lineno">   92 </span><span class="spaces">                    </span><span class="istickedoff">(fmap VarName $ Dict.keys $ AST.Module.values details)</span>
+<span class="lineno">   93 </span><span class="spaces">                    </span><span class="istickedoff">&lt;&gt; (fmap TypeName $ Dict.keys $ AST.Module.types details)</span>
+<span class="lineno">   94 </span><span class="spaces">                    </span><span class="istickedoff">&lt;&gt; (fmap CtorName $ foldMap (getCtorListings . extract . extract) $ Dict.elems $ AST.Module.types details)</span>
+<span class="lineno">   95 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   96 </span><span class="spaces">        </span><span class="istickedoff">getCtorListings :: Listing (CommentedMap name ()) -&gt; [name]</span>
+<span class="lineno">   97 </span><span class="spaces">        </span><span class="istickedoff">getCtorListings = \case</span>
+<span class="lineno">   98 </span><span class="spaces">            </span><span class="istickedoff">ClosedListing -&gt; []</span>
+<span class="lineno">   99 </span><span class="spaces">            </span><span class="istickedoff">OpenListing _ -&gt;</span>
+<span class="lineno">  100 </span><span class="spaces">                </span><span class="istickedoff">-- TODO: exposing (Type(..)) should pull in variant names from knownContents, though this should also be a warning because we can't know for sure which of those are for this type</span>
+<span class="lineno">  101 </span><span class="spaces">                </span><span class="istickedoff">[]</span>
+<span class="lineno">  102 </span><span class="spaces">            </span><span class="istickedoff">ExplicitListing ctors _ -&gt; Dict.keys ctors</span>
+<span class="lineno">  103 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  104 </span><span class="spaces">        </span><span class="istickedoff">exposed =</span>
+<span class="lineno">  105 </span><span class="spaces">            </span><span class="istickedoff">-- TODO: mark ambiguous names if multiple modules expose them</span>
+<span class="lineno">  106 </span><span class="spaces">            </span><span class="istickedoff">Dict.foldlWithKey (\a k v -&gt; Dict.union a $ getExposed k v) mempty imports</span>
+<span class="lineno">  107 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  108 </span><span class="spaces">        </span><span class="istickedoff">aliases =</span>
+<span class="lineno">  109 </span><span class="spaces">            </span><span class="istickedoff">let</span>
+<span class="lineno">  110 </span><span class="spaces">                </span><span class="istickedoff">getAlias importMethod =</span>
+<span class="lineno">  111 </span><span class="spaces">                    </span><span class="istickedoff">case AST.Module.alias importMethod of</span>
+<span class="lineno">  112 </span><span class="spaces">                        </span><span class="istickedoff">Just (C _ alias) -&gt;</span>
+<span class="lineno">  113 </span><span class="spaces">                            </span><span class="istickedoff">Just [alias]</span>
+<span class="lineno">  114 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  115 </span><span class="spaces">                        </span><span class="istickedoff">Nothing -&gt; Nothing</span>
+<span class="lineno">  116 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  117 </span><span class="spaces">                </span><span class="istickedoff">liftMaybe :: (a, Maybe b) -&gt; Maybe (a, b)</span>
+<span class="lineno">  118 </span><span class="spaces">                </span><span class="istickedoff">liftMaybe (_, Nothing) = Nothing</span>
+<span class="lineno">  119 </span><span class="spaces">                </span><span class="istickedoff">liftMaybe (a, Just b) = Just (a, b)</span>
+<span class="lineno">  120 </span><span class="spaces">            </span><span class="istickedoff">in</span>
+<span class="lineno">  121 </span><span class="spaces">            </span><span class="istickedoff">Dict.toList imports</span>
+<span class="lineno">  122 </span><span class="spaces">                </span><span class="istickedoff">|&gt; fmap (fmap getAlias)</span>
+<span class="lineno">  123 </span><span class="spaces">                </span><span class="istickedoff">|&gt; Maybe.mapMaybe liftMaybe</span>
+<span class="lineno">  124 </span><span class="spaces">                </span><span class="istickedoff">|&gt; fmap (\(a, b) -&gt; (b, a))</span>
+<span class="lineno">  125 </span><span class="spaces">                </span><span class="istickedoff">|&gt; Bimap.fromList</span>
+<span class="lineno">  126 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  127 </span><span class="spaces">        </span><span class="istickedoff">noAlias importMethod =</span>
+<span class="lineno">  128 </span><span class="spaces">            </span><span class="istickedoff">case AST.Module.alias importMethod of</span>
+<span class="lineno">  129 </span><span class="spaces">                </span><span class="istickedoff">Just _ -&gt; False</span>
+<span class="lineno">  130 </span><span class="spaces">                </span><span class="istickedoff">Nothing -&gt; True</span>
+<span class="lineno">  131 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  132 </span><span class="spaces">        </span><span class="istickedoff">directs =</span>
+<span class="lineno">  133 </span><span class="spaces">            </span><span class="istickedoff">Set.union</span>
+<span class="lineno">  134 </span><span class="spaces">                </span><span class="istickedoff">(Set.singleton [UppercaseIdentifier &quot;Basics&quot;])</span>
+<span class="lineno">  135 </span><span class="spaces">                </span><span class="istickedoff">(Dict.keysSet $ Dict.filter noAlias imports)</span>
+<span class="lineno">  136 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  137 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">ambiguous = Dict.empty</span></span>
+<span class="lineno">  138 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  139 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">exposesAll (ImportMethod _ (C _ listing)) =</span></span>
+<span class="lineno">  140 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">case listing of</span></span>
+<span class="lineno">  141 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">ExplicitListing _ _ -&gt; False</span></span>
+<span class="lineno">  142 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">OpenListing _ -&gt; True</span></span>
+<span class="lineno">  143 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">ClosedListing -&gt; False</span></span>
+<span class="lineno">  144 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  145 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">unresolvedExposingAll =</span></span>
+<span class="lineno">  146 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">Dict.filter exposesAll rawImports</span></span>
+<span class="lineno">  147 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">|&gt; Dict.keysSet</span></span>
+<span class="lineno">  148 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">|&gt; Set.filter (not . KnownContents.isKnown knownContents)</span></span>
+<span class="lineno">  149 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  150 </span><span class="spaces">    </span><span class="istickedoff">ImportInfo exposed aliases directs <span class="nottickedoff">ambiguous</span> <span class="nottickedoff">unresolvedExposingAll</span></span></span>
+
+</pre>
+</body>
+</html>

@@ -1,0 +1,452 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE OverloadedStrings #-}
+<span class="lineno">    2 </span>module Cheapskate.Inlines (
+<span class="lineno">    3 </span>        parseInlines
+<span class="lineno">    4 </span>      , pHtmlTag
+<span class="lineno">    5 </span>      , pReference
+<span class="lineno">    6 </span>      , pLinkLabel)
+<span class="lineno">    7 </span>where
+<span class="lineno">    8 </span>import Cheapskate.ParserCombinators
+<span class="lineno">    9 </span>import Cheapskate.Util
+<span class="lineno">   10 </span>import Cheapskate.Types
+<span class="lineno">   11 </span>import Data.Char hiding (Space)
+<span class="lineno">   12 </span>import qualified Data.Sequence as Seq
+<span class="lineno">   13 </span>import Data.Sequence (singleton, (&lt;|), viewl, ViewL(..))
+<span class="lineno">   14 </span>import Prelude hiding (takeWhile)
+<span class="lineno">   15 </span>import Control.Applicative
+<span class="lineno">   16 </span>import Control.Monad
+<span class="lineno">   17 </span>import Data.Text (Text)
+<span class="lineno">   18 </span>import qualified Data.Text as T
+<span class="lineno">   19 </span>import qualified Data.Set as Set
+<span class="lineno">   20 </span>
+<span class="lineno">   21 </span>-- Returns tag type and whole tag.
+<span class="lineno">   22 </span>pHtmlTag :: Parser (HtmlTagType, Text)
+<span class="lineno">   23 </span><span class="decl"><span class="istickedoff">pHtmlTag = do</span>
+<span class="lineno">   24 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char '&lt;'</span>
+<span class="lineno">   25 </span><span class="spaces">  </span><span class="istickedoff">-- do not end the tag with a &gt; character in a quoted attribute.</span>
+<span class="lineno">   26 </span><span class="spaces">  </span><span class="istickedoff">closing &lt;- (char '/' &gt;&gt; return True) &lt;|&gt; return False</span>
+<span class="lineno">   27 </span><span class="spaces">  </span><span class="istickedoff">tagname &lt;- takeWhile1 (\c -&gt; isAsciiAlphaNum c || c == '?' || c == '!')</span>
+<span class="lineno">   28 </span><span class="spaces">  </span><span class="istickedoff">let tagname' = T.toLower tagname</span>
+<span class="lineno">   29 </span><span class="spaces">  </span><span class="istickedoff">let attr = do ss &lt;- takeWhile isSpace</span>
+<span class="lineno">   30 </span><span class="spaces">                </span><span class="istickedoff">x &lt;- satisfy isLetter</span>
+<span class="lineno">   31 </span><span class="spaces">                </span><span class="istickedoff">xs &lt;- <span class="nottickedoff">takeWhile (\c -&gt; isAsciiAlphaNum c || c == ':')</span></span>
+<span class="lineno">   32 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">skip (=='=')</span></span>
+<span class="lineno">   33 </span><span class="spaces">                </span><span class="istickedoff">v &lt;- <span class="nottickedoff">pQuoted '&quot;' &lt;|&gt; pQuoted '\'' &lt;|&gt; takeWhile1 isAlphaNum</span></span>
+<span class="lineno">   34 </span><span class="spaces">                      </span><span class="istickedoff"><span class="nottickedoff">&lt;|&gt; return &quot;&quot;</span></span>
+<span class="lineno">   35 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">return $ ss &lt;&gt; T.singleton x &lt;&gt; xs &lt;&gt; &quot;=&quot; &lt;&gt; v</span></span>
+<span class="lineno">   36 </span><span class="spaces">  </span><span class="istickedoff">attrs &lt;- T.concat &lt;$&gt; many attr</span>
+<span class="lineno">   37 </span><span class="spaces">  </span><span class="istickedoff">final &lt;- takeWhile (\c -&gt; isSpace c || c == '/')</span>
+<span class="lineno">   38 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char '&gt;'</span>
+<span class="lineno">   39 </span><span class="spaces">  </span><span class="istickedoff">let tagtype = if <span class="tickonlyfalse">closing</span></span>
+<span class="lineno">   40 </span><span class="spaces">                   </span><span class="istickedoff">then <span class="nottickedoff">Closing tagname'</span></span>
+<span class="lineno">   41 </span><span class="spaces">                   </span><span class="istickedoff">else case T.stripSuffix &quot;/&quot; final of</span>
+<span class="lineno">   42 </span><span class="spaces">                         </span><span class="istickedoff">Just _  -&gt; <span class="nottickedoff">SelfClosing tagname'</span></span>
+<span class="lineno">   43 </span><span class="spaces">                         </span><span class="istickedoff">Nothing -&gt; Opening tagname'</span>
+<span class="lineno">   44 </span><span class="spaces">  </span><span class="istickedoff">return (tagtype,</span>
+<span class="lineno">   45 </span><span class="spaces">          </span><span class="istickedoff">T.pack ('&lt;' : ['/' | closing]) &lt;&gt; tagname &lt;&gt; attrs &lt;&gt; final &lt;&gt; &quot;&gt;&quot;)</span></span>
+<span class="lineno">   46 </span>
+<span class="lineno">   47 </span>-- Parses a quoted attribute value.
+<span class="lineno">   48 </span>pQuoted :: Char -&gt; Parser Text
+<span class="lineno">   49 </span><span class="decl"><span class="nottickedoff">pQuoted c = do</span>
+<span class="lineno">   50 </span><span class="spaces">  </span><span class="nottickedoff">skip (== c)</span>
+<span class="lineno">   51 </span><span class="spaces">  </span><span class="nottickedoff">contents &lt;- takeTill (== c)</span>
+<span class="lineno">   52 </span><span class="spaces">  </span><span class="nottickedoff">skip (== c)</span>
+<span class="lineno">   53 </span><span class="spaces">  </span><span class="nottickedoff">return (T.singleton c &lt;&gt; contents &lt;&gt; T.singleton c)</span></span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>-- Parses an HTML comment. This isn't really correct to spec, but should
+<span class="lineno">   56 </span>-- do for now.
+<span class="lineno">   57 </span>pHtmlComment :: Parser Text
+<span class="lineno">   58 </span><span class="decl"><span class="istickedoff">pHtmlComment = do</span>
+<span class="lineno">   59 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- string &quot;&lt;!--&quot;</span>
+<span class="lineno">   60 </span><span class="spaces">  </span><span class="istickedoff">rest &lt;- <span class="nottickedoff">manyTill anyChar (string &quot;--&gt;&quot;)</span></span>
+<span class="lineno">   61 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">return $ &quot;&lt;!--&quot; &lt;&gt; T.pack rest &lt;&gt; &quot;--&gt;&quot;</span></span></span>
+<span class="lineno">   62 </span>
+<span class="lineno">   63 </span>-- A link label [like this].  Note the precedence:  code backticks have
+<span class="lineno">   64 </span>-- precedence over label bracket markers, which have precedence over
+<span class="lineno">   65 </span>-- *, _, and other inline formatting markers.
+<span class="lineno">   66 </span>-- So, 2 below contains a link while 1 does not:
+<span class="lineno">   67 </span>-- 1. [a link `with a ](/url)` character
+<span class="lineno">   68 </span>-- 2. [a link *with emphasized ](/url) text*
+<span class="lineno">   69 </span>pLinkLabel :: Parser Text
+<span class="lineno">   70 </span><span class="decl"><span class="istickedoff">pLinkLabel = char '[' *&gt; (T.concat &lt;$&gt;</span>
+<span class="lineno">   71 </span><span class="spaces">  </span><span class="istickedoff">(manyTill (regChunk &lt;|&gt; pEscaped &lt;|&gt; bracketed &lt;|&gt; codeChunk) (char ']')))</span>
+<span class="lineno">   72 </span><span class="spaces">  </span><span class="istickedoff">where regChunk = takeWhile1 (\c -&gt; c /='`' &amp;&amp; c /='[' &amp;&amp; c /=']' &amp;&amp; c /='\\')</span>
+<span class="lineno">   73 </span><span class="spaces">        </span><span class="istickedoff">codeChunk = snd &lt;$&gt; pCode'</span>
+<span class="lineno">   74 </span><span class="spaces">        </span><span class="istickedoff">bracketed = <span class="nottickedoff">inBrackets</span> &lt;$&gt; pLinkLabel</span>
+<span class="lineno">   75 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">inBrackets t = &quot;[&quot; &lt;&gt; t &lt;&gt; &quot;]&quot;</span></span></span>
+<span class="lineno">   76 </span>
+<span class="lineno">   77 </span>-- A URL in a link or reference.  This may optionally be contained
+<span class="lineno">   78 </span>-- in `&lt;..&gt;`; otherwise whitespace and unbalanced right parentheses
+<span class="lineno">   79 </span>-- aren't allowed.  Newlines aren't allowed in any case.
+<span class="lineno">   80 </span>pLinkUrl :: Parser Text
+<span class="lineno">   81 </span><span class="decl"><span class="istickedoff">pLinkUrl = do</span>
+<span class="lineno">   82 </span><span class="spaces">  </span><span class="istickedoff">inPointy &lt;- (char '&lt;' &gt;&gt; <span class="nottickedoff">return True</span>) &lt;|&gt; return False</span>
+<span class="lineno">   83 </span><span class="spaces">  </span><span class="istickedoff">if <span class="tickonlyfalse">inPointy</span></span>
+<span class="lineno">   84 </span><span class="spaces">     </span><span class="istickedoff">then <span class="nottickedoff">T.pack &lt;$&gt; manyTill</span></span>
+<span class="lineno">   85 </span><span class="spaces">           </span><span class="istickedoff"><span class="nottickedoff">(pSatisfy (\c -&gt; c /='\r' &amp;&amp; c /='\n')) (char '&gt;')</span></span>
+<span class="lineno">   86 </span><span class="spaces">     </span><span class="istickedoff">else T.concat &lt;$&gt; many (regChunk &lt;|&gt; parenChunk)</span>
+<span class="lineno">   87 </span><span class="spaces">    </span><span class="istickedoff">where regChunk = takeWhile1 (notInClass &quot; \n()\\&quot;) &lt;|&gt; pEscaped</span>
+<span class="lineno">   88 </span><span class="spaces">          </span><span class="istickedoff">parenChunk = <span class="nottickedoff">parenthesize . T.concat</span> &lt;$&gt; (char '(' *&gt;</span>
+<span class="lineno">   89 </span><span class="spaces">                         </span><span class="istickedoff"><span class="nottickedoff">manyTill (regChunk &lt;|&gt; parenChunk) (char ')')</span>)</span>
+<span class="lineno">   90 </span><span class="spaces">          </span><span class="istickedoff"><span class="nottickedoff">parenthesize x = &quot;(&quot; &lt;&gt; x &lt;&gt; &quot;)&quot;</span></span></span>
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>-- A link title, single or double quoted or in parentheses.
+<span class="lineno">   93 </span>-- Note that Markdown.pl doesn't allow the parenthesized form in
+<span class="lineno">   94 </span>-- inline links -- only in references -- but this restriction seems
+<span class="lineno">   95 </span>-- arbitrary, so we remove it here.
+<span class="lineno">   96 </span>pLinkTitle :: Parser Text
+<span class="lineno">   97 </span><span class="decl"><span class="istickedoff">pLinkTitle = do</span>
+<span class="lineno">   98 </span><span class="spaces">  </span><span class="istickedoff">c &lt;- satisfy (\c -&gt; c == '&quot;' || c == '\'' || c == '(')</span>
+<span class="lineno">   99 </span><span class="spaces">  </span><span class="istickedoff">next &lt;- peekChar</span>
+<span class="lineno">  100 </span><span class="spaces">  </span><span class="istickedoff">case next of</span>
+<span class="lineno">  101 </span><span class="spaces">       </span><span class="istickedoff">Nothing                 -&gt; <span class="nottickedoff">mzero</span></span>
+<span class="lineno">  102 </span><span class="spaces">       </span><span class="istickedoff">Just x</span>
+<span class="lineno">  103 </span><span class="spaces">         </span><span class="istickedoff">| <span class="tickonlyfalse">isWhitespace x</span>      -&gt; <span class="nottickedoff">mzero</span></span>
+<span class="lineno">  104 </span><span class="spaces">         </span><span class="istickedoff">| <span class="tickonlyfalse">x == ')'</span>            -&gt; <span class="nottickedoff">mzero</span></span>
+<span class="lineno">  105 </span><span class="spaces">         </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span>           -&gt; return <span class="nottickedoff">()</span></span>
+<span class="lineno">  106 </span><span class="spaces">  </span><span class="istickedoff">let ender = if <span class="tickonlyfalse">c == '('</span> then <span class="nottickedoff">')'</span> else c</span>
+<span class="lineno">  107 </span><span class="spaces">  </span><span class="istickedoff">let pEnder = char ender &lt;* nfb (skip isAlphaNum)</span>
+<span class="lineno">  108 </span><span class="spaces">  </span><span class="istickedoff">let regChunk = takeWhile1 (\x -&gt; x /= ender &amp;&amp; x /= '\\') &lt;|&gt; <span class="nottickedoff">pEscaped</span></span>
+<span class="lineno">  109 </span><span class="spaces">  </span><span class="istickedoff">let <span class="nottickedoff">nestedChunk = (\x -&gt; T.singleton c &lt;&gt; x &lt;&gt; T.singleton ender)</span></span>
+<span class="lineno">  110 </span><span class="spaces">                      </span><span class="istickedoff"><span class="nottickedoff">&lt;$&gt; pLinkTitle</span></span>
+<span class="lineno">  111 </span><span class="spaces">  </span><span class="istickedoff">T.concat &lt;$&gt; manyTill (regChunk &lt;|&gt; <span class="nottickedoff">nestedChunk</span>) pEnder</span></span>
+<span class="lineno">  112 </span>
+<span class="lineno">  113 </span>-- A link reference is a square-bracketed link label, a colon,
+<span class="lineno">  114 </span>-- optional space or newline, a URL, optional space or newline,
+<span class="lineno">  115 </span>-- and an optional link title.  (Note:  we assume the input is
+<span class="lineno">  116 </span>-- pre-stripped, with no leading/trailing spaces.)
+<span class="lineno">  117 </span>pReference :: Parser (Text, Text, Text)
+<span class="lineno">  118 </span><span class="decl"><span class="istickedoff">pReference = do</span>
+<span class="lineno">  119 </span><span class="spaces">  </span><span class="istickedoff">lab &lt;- pLinkLabel</span>
+<span class="lineno">  120 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char ':'</span>
+<span class="lineno">  121 </span><span class="spaces">  </span><span class="istickedoff">scanSpnl</span>
+<span class="lineno">  122 </span><span class="spaces">  </span><span class="istickedoff">url &lt;- pLinkUrl</span>
+<span class="lineno">  123 </span><span class="spaces">  </span><span class="istickedoff">tit &lt;- option T.empty $ scanSpnl &gt;&gt; pLinkTitle</span>
+<span class="lineno">  124 </span><span class="spaces">  </span><span class="istickedoff">endOfInput</span>
+<span class="lineno">  125 </span><span class="spaces">  </span><span class="istickedoff">return (lab, url, tit)</span></span>
+<span class="lineno">  126 </span>
+<span class="lineno">  127 </span>-- Parses an escaped character and returns a Text.
+<span class="lineno">  128 </span>pEscaped :: Parser Text
+<span class="lineno">  129 </span><span class="decl"><span class="istickedoff">pEscaped = T.singleton &lt;$&gt; (skip (=='\\') *&gt; satisfy isEscapable)</span></span>
+<span class="lineno">  130 </span>
+<span class="lineno">  131 </span>-- Parses a (possibly escaped) character satisfying the predicate.
+<span class="lineno">  132 </span>pSatisfy :: (Char -&gt; Bool) -&gt; Parser Char
+<span class="lineno">  133 </span><span class="decl"><span class="nottickedoff">pSatisfy p =</span>
+<span class="lineno">  134 </span><span class="spaces">  </span><span class="nottickedoff">satisfy (\c -&gt; c /= '\\' &amp;&amp; p c)</span>
+<span class="lineno">  135 </span><span class="spaces">   </span><span class="nottickedoff">&lt;|&gt; (char '\\' *&gt; satisfy (\c -&gt; isEscapable c &amp;&amp; p c))</span></span>
+<span class="lineno">  136 </span>
+<span class="lineno">  137 </span>-- Parse a text into inlines, resolving reference links
+<span class="lineno">  138 </span>-- using the reference map.
+<span class="lineno">  139 </span>parseInlines :: ReferenceMap -&gt; Text -&gt; Inlines
+<span class="lineno">  140 </span><span class="decl"><span class="istickedoff">parseInlines refmap t =</span>
+<span class="lineno">  141 </span><span class="spaces">  </span><span class="istickedoff">case parse (msum &lt;$&gt; many (pInline <span class="nottickedoff">refmap</span>) &lt;* endOfInput) t of</span>
+<span class="lineno">  142 </span><span class="spaces">       </span><span class="istickedoff">Left e   -&gt; <span class="nottickedoff">error (&quot;parseInlines: &quot; ++ show e)</span> -- should not happen</span>
+<span class="lineno">  143 </span><span class="spaces">       </span><span class="istickedoff">Right r  -&gt; r</span></span>
+<span class="lineno">  144 </span>
+<span class="lineno">  145 </span>pInline :: ReferenceMap -&gt; Parser Inlines
+<span class="lineno">  146 </span><span class="decl"><span class="istickedoff">pInline refmap =</span>
+<span class="lineno">  147 </span><span class="spaces">           </span><span class="istickedoff">pAsciiStr</span>
+<span class="lineno">  148 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pSpace</span>
+<span class="lineno">  149 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pEnclosure '*' <span class="nottickedoff">refmap</span>  -- strong/emph</span>
+<span class="lineno">  150 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; (notAfter isAlphaNum *&gt; pEnclosure '_' <span class="nottickedoff">refmap</span>)</span>
+<span class="lineno">  151 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pCode</span>
+<span class="lineno">  152 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pLink <span class="nottickedoff">refmap</span></span>
+<span class="lineno">  153 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pImage <span class="nottickedoff">refmap</span></span>
+<span class="lineno">  154 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pRawHtml</span>
+<span class="lineno">  155 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pAutolink</span>
+<span class="lineno">  156 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pEntity</span>
+<span class="lineno">  157 </span><span class="spaces">       </span><span class="istickedoff">&lt;|&gt; pSym</span></span>
+<span class="lineno">  158 </span>
+<span class="lineno">  159 </span>-- Parse spaces or newlines, and determine whether
+<span class="lineno">  160 </span>-- we have a regular space, a line break (two spaces before
+<span class="lineno">  161 </span>-- a newline), or a soft break (newline without two spaces
+<span class="lineno">  162 </span>-- before).
+<span class="lineno">  163 </span>pSpace :: Parser Inlines
+<span class="lineno">  164 </span><span class="decl"><span class="istickedoff">pSpace = do</span>
+<span class="lineno">  165 </span><span class="spaces">  </span><span class="istickedoff">ss &lt;- takeWhile1 isWhitespace</span>
+<span class="lineno">  166 </span><span class="spaces">  </span><span class="istickedoff">return $ singleton</span>
+<span class="lineno">  167 </span><span class="spaces">         </span><span class="istickedoff">$ if T.any (=='\n') ss</span>
+<span class="lineno">  168 </span><span class="spaces">              </span><span class="istickedoff">then if <span class="tickonlyfalse">&quot;  &quot; `T.isPrefixOf` ss</span></span>
+<span class="lineno">  169 </span><span class="spaces">                   </span><span class="istickedoff">then <span class="nottickedoff">LineBreak</span></span>
+<span class="lineno">  170 </span><span class="spaces">                   </span><span class="istickedoff">else SoftBreak</span>
+<span class="lineno">  171 </span><span class="spaces">              </span><span class="istickedoff">else Space</span></span>
+<span class="lineno">  172 </span>
+<span class="lineno">  173 </span>isAsciiAlphaNum :: Char -&gt; Bool
+<span class="lineno">  174 </span><span class="decl"><span class="istickedoff">isAsciiAlphaNum c =</span>
+<span class="lineno">  175 </span><span class="spaces">  </span><span class="istickedoff">(c &gt;= 'a' &amp;&amp; c &lt;= 'z') ||</span>
+<span class="lineno">  176 </span><span class="spaces">  </span><span class="istickedoff">(c &gt;= 'A' &amp;&amp; c &lt;= 'Z') ||</span>
+<span class="lineno">  177 </span><span class="spaces">  </span><span class="istickedoff">(c &gt;= '0' &amp;&amp; c &lt;= '9')</span></span>
+<span class="lineno">  178 </span>
+<span class="lineno">  179 </span>pAsciiStr :: Parser Inlines
+<span class="lineno">  180 </span><span class="decl"><span class="istickedoff">pAsciiStr = do</span>
+<span class="lineno">  181 </span><span class="spaces">  </span><span class="istickedoff">t &lt;- takeWhile1 isAsciiAlphaNum</span>
+<span class="lineno">  182 </span><span class="spaces">  </span><span class="istickedoff">mbc &lt;- peekChar</span>
+<span class="lineno">  183 </span><span class="spaces">  </span><span class="istickedoff">case mbc of</span>
+<span class="lineno">  184 </span><span class="spaces">       </span><span class="istickedoff">Just ':' -&gt; if t `Set.member` schemeSet</span>
+<span class="lineno">  185 </span><span class="spaces">                      </span><span class="istickedoff">then pUri t</span>
+<span class="lineno">  186 </span><span class="spaces">                      </span><span class="istickedoff">else return $ singleton $ Str t</span>
+<span class="lineno">  187 </span><span class="spaces">       </span><span class="istickedoff">_        -&gt; return $ singleton $ Str t</span></span>
+<span class="lineno">  188 </span>
+<span class="lineno">  189 </span>-- Catch all -- parse an escaped character, an escaped
+<span class="lineno">  190 </span>-- newline, or any remaining symbol character.
+<span class="lineno">  191 </span>pSym :: Parser Inlines
+<span class="lineno">  192 </span><span class="decl"><span class="istickedoff">pSym = do</span>
+<span class="lineno">  193 </span><span class="spaces">  </span><span class="istickedoff">c &lt;- anyChar</span>
+<span class="lineno">  194 </span><span class="spaces">  </span><span class="istickedoff">let ch = singleton . Str . T.singleton</span>
+<span class="lineno">  195 </span><span class="spaces">  </span><span class="istickedoff">if c == '\\'</span>
+<span class="lineno">  196 </span><span class="spaces">     </span><span class="istickedoff">then ch &lt;$&gt; satisfy isEscapable</span>
+<span class="lineno">  197 </span><span class="spaces">          </span><span class="istickedoff">&lt;|&gt; <span class="nottickedoff">singleton LineBreak</span> &lt;$ satisfy (=='\n')</span>
+<span class="lineno">  198 </span><span class="spaces">          </span><span class="istickedoff">&lt;|&gt; return (ch '\\')</span>
+<span class="lineno">  199 </span><span class="spaces">     </span><span class="istickedoff">else return (ch c)</span></span>
+<span class="lineno">  200 </span>
+<span class="lineno">  201 </span>-- http://www.iana.org/assignments/uri-schemes.html plus
+<span class="lineno">  202 </span>-- the unofficial schemes coap, doi, javascript.
+<span class="lineno">  203 </span>schemes :: [Text]
+<span class="lineno">  204 </span><span class="decl"><span class="istickedoff">schemes = [ -- unofficial</span>
+<span class="lineno">  205 </span><span class="spaces">            </span><span class="istickedoff">&quot;coap&quot;,&quot;doi&quot;,&quot;javascript&quot;</span>
+<span class="lineno">  206 </span><span class="spaces">           </span><span class="istickedoff">-- official</span>
+<span class="lineno">  207 </span><span class="spaces">           </span><span class="istickedoff">,&quot;aaa&quot;,&quot;aaas&quot;,&quot;about&quot;,&quot;acap&quot;</span>
+<span class="lineno">  208 </span><span class="spaces">           </span><span class="istickedoff">,&quot;cap&quot;,&quot;cid&quot;,&quot;crid&quot;,&quot;data&quot;,&quot;dav&quot;,&quot;dict&quot;,&quot;dns&quot;,&quot;file&quot;,&quot;ftp&quot;</span>
+<span class="lineno">  209 </span><span class="spaces">           </span><span class="istickedoff">,&quot;geo&quot;,&quot;go&quot;,&quot;gopher&quot;,&quot;h323&quot;,&quot;http&quot;,&quot;https&quot;,&quot;iax&quot;,&quot;icap&quot;,&quot;im&quot;</span>
+<span class="lineno">  210 </span><span class="spaces">           </span><span class="istickedoff">,&quot;imap&quot;,&quot;info&quot;,&quot;ipp&quot;,&quot;iris&quot;,&quot;iris.beep&quot;,&quot;iris.xpc&quot;,&quot;iris.xpcs&quot;</span>
+<span class="lineno">  211 </span><span class="spaces">           </span><span class="istickedoff">,&quot;iris.lwz&quot;,&quot;ldap&quot;,&quot;mailto&quot;,&quot;mid&quot;,&quot;msrp&quot;,&quot;msrps&quot;,&quot;mtqp&quot;</span>
+<span class="lineno">  212 </span><span class="spaces">           </span><span class="istickedoff">,&quot;mupdate&quot;,&quot;news&quot;,&quot;nfs&quot;,&quot;ni&quot;,&quot;nih&quot;,&quot;nntp&quot;,&quot;opaquelocktoken&quot;,&quot;pop&quot;</span>
+<span class="lineno">  213 </span><span class="spaces">           </span><span class="istickedoff">,&quot;pres&quot;,&quot;rtsp&quot;,&quot;service&quot;,&quot;session&quot;,&quot;shttp&quot;,&quot;sieve&quot;,&quot;sip&quot;,&quot;sips&quot;</span>
+<span class="lineno">  214 </span><span class="spaces">           </span><span class="istickedoff">,&quot;sms&quot;,&quot;snmp&quot;,&quot;soap.beep&quot;,&quot;soap.beeps&quot;,&quot;tag&quot;,&quot;tel&quot;,&quot;telnet&quot;,&quot;tftp&quot;</span>
+<span class="lineno">  215 </span><span class="spaces">           </span><span class="istickedoff">,&quot;thismessage&quot;,&quot;tn3270&quot;,&quot;tip&quot;,&quot;tv&quot;,&quot;urn&quot;,&quot;vemmi&quot;,&quot;ws&quot;,&quot;wss&quot;</span>
+<span class="lineno">  216 </span><span class="spaces">           </span><span class="istickedoff">,&quot;xcon&quot;,&quot;xcon-userid&quot;,&quot;xmlrpc.beep&quot;,&quot;xmlrpc.beeps&quot;,&quot;xmpp&quot;,&quot;z39.50r&quot;</span>
+<span class="lineno">  217 </span><span class="spaces">           </span><span class="istickedoff">,&quot;z39.50s&quot;</span>
+<span class="lineno">  218 </span><span class="spaces">           </span><span class="istickedoff">-- provisional</span>
+<span class="lineno">  219 </span><span class="spaces">           </span><span class="istickedoff">,&quot;adiumxtra&quot;,&quot;afp&quot;,&quot;afs&quot;,&quot;aim&quot;,&quot;apt&quot;,&quot;attachment&quot;,&quot;aw&quot;</span>
+<span class="lineno">  220 </span><span class="spaces">           </span><span class="istickedoff">,&quot;beshare&quot;,&quot;bitcoin&quot;,&quot;bolo&quot;,&quot;callto&quot;,&quot;chrome&quot;,&quot;chrome-extension&quot;</span>
+<span class="lineno">  221 </span><span class="spaces">           </span><span class="istickedoff">,&quot;com-eventbrite-attendee&quot;,&quot;content&quot;,&quot;cvs&quot;,&quot;dlna-playsingle&quot;</span>
+<span class="lineno">  222 </span><span class="spaces">           </span><span class="istickedoff">,&quot;dlna-playcontainer&quot;,&quot;dtn&quot;,&quot;dvb&quot;,&quot;ed2k&quot;,&quot;facetime&quot;,&quot;feed&quot;</span>
+<span class="lineno">  223 </span><span class="spaces">           </span><span class="istickedoff">,&quot;finger&quot;,&quot;fish&quot;,&quot;gg&quot;,&quot;git&quot;,&quot;gizmoproject&quot;,&quot;gtalk&quot;</span>
+<span class="lineno">  224 </span><span class="spaces">           </span><span class="istickedoff">,&quot;hcp&quot;,&quot;icon&quot;,&quot;ipn&quot;,&quot;irc&quot;,&quot;irc6&quot;,&quot;ircs&quot;,&quot;itms&quot;,&quot;jar&quot;</span>
+<span class="lineno">  225 </span><span class="spaces">           </span><span class="istickedoff">,&quot;jms&quot;,&quot;keyparc&quot;,&quot;lastfm&quot;,&quot;ldaps&quot;,&quot;magnet&quot;,&quot;maps&quot;,&quot;market&quot;</span>
+<span class="lineno">  226 </span><span class="spaces">           </span><span class="istickedoff">,&quot;message&quot;,&quot;mms&quot;,&quot;ms-help&quot;,&quot;msnim&quot;,&quot;mumble&quot;,&quot;mvn&quot;,&quot;notes&quot;</span>
+<span class="lineno">  227 </span><span class="spaces">           </span><span class="istickedoff">,&quot;oid&quot;,&quot;palm&quot;,&quot;paparazzi&quot;,&quot;platform&quot;,&quot;proxy&quot;,&quot;psyc&quot;,&quot;query&quot;</span>
+<span class="lineno">  228 </span><span class="spaces">           </span><span class="istickedoff">,&quot;res&quot;,&quot;resource&quot;,&quot;rmi&quot;,&quot;rsync&quot;,&quot;rtmp&quot;,&quot;secondlife&quot;,&quot;sftp&quot;</span>
+<span class="lineno">  229 </span><span class="spaces">           </span><span class="istickedoff">,&quot;sgn&quot;,&quot;skype&quot;,&quot;smb&quot;,&quot;soldat&quot;,&quot;spotify&quot;,&quot;ssh&quot;,&quot;steam&quot;,&quot;svn&quot;</span>
+<span class="lineno">  230 </span><span class="spaces">           </span><span class="istickedoff">,&quot;teamspeak&quot;,&quot;things&quot;,&quot;udp&quot;,&quot;unreal&quot;,&quot;ut2004&quot;,&quot;ventrilo&quot;</span>
+<span class="lineno">  231 </span><span class="spaces">           </span><span class="istickedoff">,&quot;view-source&quot;,&quot;webcal&quot;,&quot;wtai&quot;,&quot;wyciwyg&quot;,&quot;xfire&quot;,&quot;xri&quot;</span>
+<span class="lineno">  232 </span><span class="spaces">           </span><span class="istickedoff">,&quot;ymsgr&quot; ]</span></span>
+<span class="lineno">  233 </span>
+<span class="lineno">  234 </span>-- Make them a set for more efficient lookup.
+<span class="lineno">  235 </span>schemeSet :: Set.Set Text
+<span class="lineno">  236 </span><span class="decl"><span class="istickedoff">schemeSet = Set.fromList $ schemes ++ map T.toUpper schemes</span></span>
+<span class="lineno">  237 </span>
+<span class="lineno">  238 </span>-- Parse a URI, using heuristics to avoid capturing final punctuation.
+<span class="lineno">  239 </span>pUri :: Text -&gt; Parser Inlines
+<span class="lineno">  240 </span><span class="decl"><span class="istickedoff">pUri scheme = do</span>
+<span class="lineno">  241 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char ':'</span>
+<span class="lineno">  242 </span><span class="spaces">  </span><span class="istickedoff">x &lt;- scan (OpenParens <span class="nottickedoff">0</span>) uriScanner</span>
+<span class="lineno">  243 </span><span class="spaces">  </span><span class="istickedoff">guard $ not $ T.null x</span>
+<span class="lineno">  244 </span><span class="spaces">  </span><span class="istickedoff">let (rawuri, endingpunct) =</span>
+<span class="lineno">  245 </span><span class="spaces">        </span><span class="istickedoff">case T.last x of</span>
+<span class="lineno">  246 </span><span class="spaces">             </span><span class="istickedoff">c | <span class="tickonlyfalse">c `elem` (&quot;.;?!:,&quot; :: String)</span> -&gt;</span>
+<span class="lineno">  247 </span><span class="spaces">               </span><span class="istickedoff"><span class="nottickedoff">(scheme &lt;&gt; &quot;:&quot; &lt;&gt; T.init x, singleton (Str (T.singleton c)))</span></span>
+<span class="lineno">  248 </span><span class="spaces">             </span><span class="istickedoff">_ -&gt; (scheme &lt;&gt; &quot;:&quot; &lt;&gt; x, mempty)</span>
+<span class="lineno">  249 </span><span class="spaces">  </span><span class="istickedoff">return $ autoLink rawuri &lt;&gt; endingpunct</span></span>
+<span class="lineno">  250 </span>
+<span class="lineno">  251 </span>-- Scan non-ascii characters and ascii characters allowed in a URI.
+<span class="lineno">  252 </span>-- We allow punctuation except when followed by a space, since
+<span class="lineno">  253 </span>-- we don't want the trailing '.' in 'http://google.com.'
+<span class="lineno">  254 </span>-- We want to allow
+<span class="lineno">  255 </span>-- http://en.wikipedia.org/wiki/State_of_emergency_(disambiguation)
+<span class="lineno">  256 </span>-- as a URL, while NOT picking up the closing paren in
+<span class="lineno">  257 </span>-- (http://wikipedia.org)
+<span class="lineno">  258 </span>-- So we include balanced parens in the URL.
+<span class="lineno">  259 </span>
+<span class="lineno">  260 </span>data OpenParens = OpenParens Int
+<span class="lineno">  261 </span>
+<span class="lineno">  262 </span>uriScanner :: OpenParens -&gt; Char -&gt; Maybe OpenParens
+<span class="lineno">  263 </span><span class="decl"><span class="istickedoff">uriScanner _ ' '  = <span class="nottickedoff">Nothing</span></span>
+<span class="lineno">  264 </span><span class="spaces"></span><span class="istickedoff">uriScanner _ '\n' = Nothing</span>
+<span class="lineno">  265 </span><span class="spaces"></span><span class="istickedoff">uriScanner (OpenParens n) '(' = <span class="nottickedoff">Just (OpenParens (n + 1))</span></span>
+<span class="lineno">  266 </span><span class="spaces"></span><span class="istickedoff">uriScanner (OpenParens n) ')'</span>
+<span class="lineno">  267 </span><span class="spaces">  </span><span class="istickedoff">| <span class="nottickedoff">n &gt; 0</span> = <span class="nottickedoff">Just (OpenParens (n - 1))</span></span>
+<span class="lineno">  268 </span><span class="spaces">  </span><span class="istickedoff">| <span class="nottickedoff">otherwise</span> = <span class="nottickedoff">Nothing</span></span>
+<span class="lineno">  269 </span><span class="spaces"></span><span class="istickedoff">uriScanner st '+' = <span class="nottickedoff">Just st</span></span>
+<span class="lineno">  270 </span><span class="spaces"></span><span class="istickedoff">uriScanner st '/' = Just st</span>
+<span class="lineno">  271 </span><span class="spaces"></span><span class="istickedoff">uriScanner _ c | <span class="tickonlyfalse">isSpace c</span> = <span class="nottickedoff">Nothing</span></span>
+<span class="lineno">  272 </span><span class="spaces"></span><span class="istickedoff">uriScanner st _ = Just st</span></span>
+<span class="lineno">  273 </span>
+<span class="lineno">  274 </span>-- Parses material enclosed in *s, **s, _s, or __s.
+<span class="lineno">  275 </span>-- Designed to avoid backtracking.
+<span class="lineno">  276 </span>pEnclosure :: Char -&gt; ReferenceMap -&gt; Parser Inlines
+<span class="lineno">  277 </span><span class="decl"><span class="istickedoff">pEnclosure c refmap = do</span>
+<span class="lineno">  278 </span><span class="spaces">  </span><span class="istickedoff">cs &lt;- takeWhile1 (== c)</span>
+<span class="lineno">  279 </span><span class="spaces">  </span><span class="istickedoff">(Str cs &lt;|) &lt;$&gt; pSpace</span>
+<span class="lineno">  280 </span><span class="spaces">   </span><span class="istickedoff">&lt;|&gt; case T.length cs of</span>
+<span class="lineno">  281 </span><span class="spaces">            </span><span class="istickedoff">3  -&gt; <span class="nottickedoff">pThree c refmap</span></span>
+<span class="lineno">  282 </span><span class="spaces">            </span><span class="istickedoff">2  -&gt; pTwo c <span class="nottickedoff">refmap</span> mempty</span>
+<span class="lineno">  283 </span><span class="spaces">            </span><span class="istickedoff">1  -&gt; pOne c <span class="nottickedoff">refmap</span> mempty</span>
+<span class="lineno">  284 </span><span class="spaces">            </span><span class="istickedoff">_  -&gt; <span class="nottickedoff">return (singleton $ Str cs)</span></span></span>
+<span class="lineno">  285 </span>
+<span class="lineno">  286 </span>-- singleton sequence or empty if contents are empty
+<span class="lineno">  287 </span>single :: (Inlines -&gt; Inline) -&gt; Inlines -&gt; Inlines
+<span class="lineno">  288 </span><span class="decl"><span class="istickedoff">single constructor ils = if <span class="tickonlyfalse">Seq.null ils</span></span>
+<span class="lineno">  289 </span><span class="spaces">                            </span><span class="istickedoff">then <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  290 </span><span class="spaces">                            </span><span class="istickedoff">else singleton (constructor ils)</span></span>
+<span class="lineno">  291 </span>
+<span class="lineno">  292 </span>-- parse inlines til you hit a c, and emit Emph.
+<span class="lineno">  293 </span>-- if you never hit a c, emit '*' + inlines parsed.
+<span class="lineno">  294 </span>pOne :: Char -&gt; ReferenceMap -&gt; Inlines -&gt; Parser Inlines
+<span class="lineno">  295 </span><span class="decl"><span class="istickedoff">pOne c refmap prefix = do</span>
+<span class="lineno">  296 </span><span class="spaces">  </span><span class="istickedoff">contents &lt;- msum &lt;$&gt; many ( (nfbChar c &gt;&gt; pInline <span class="nottickedoff">refmap</span>)</span>
+<span class="lineno">  297 </span><span class="spaces">                             </span><span class="istickedoff">&lt;|&gt; (string (T.pack [c,c]) &gt;&gt;</span>
+<span class="lineno">  298 </span><span class="spaces">                                  </span><span class="istickedoff"><span class="nottickedoff">nfbChar c</span> &gt;&gt; <span class="nottickedoff">pTwo c refmap mempty</span>) )</span>
+<span class="lineno">  299 </span><span class="spaces">  </span><span class="istickedoff">(char c &gt;&gt; return (single Emph $ prefix &lt;&gt; contents))</span>
+<span class="lineno">  300 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; <span class="nottickedoff">return (singleton (Str (T.singleton c)) &lt;&gt; (prefix &lt;&gt; contents))</span></span></span>
+<span class="lineno">  301 </span>
+<span class="lineno">  302 </span>-- parse inlines til you hit two c's, and emit Strong.
+<span class="lineno">  303 </span>-- if you never do hit two c's, emit '**' plus + inlines parsed.
+<span class="lineno">  304 </span>pTwo :: Char -&gt; ReferenceMap -&gt; Inlines -&gt; Parser Inlines
+<span class="lineno">  305 </span><span class="decl"><span class="istickedoff">pTwo c refmap prefix = do</span>
+<span class="lineno">  306 </span><span class="spaces">  </span><span class="istickedoff">let ender = string $ T.pack [c,c]</span>
+<span class="lineno">  307 </span><span class="spaces">  </span><span class="istickedoff">contents &lt;- msum &lt;$&gt; many (nfb ender &gt;&gt; pInline <span class="nottickedoff">refmap</span>)</span>
+<span class="lineno">  308 </span><span class="spaces">  </span><span class="istickedoff">(ender &gt;&gt; return (single Strong $ prefix &lt;&gt; contents))</span>
+<span class="lineno">  309 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; <span class="nottickedoff">return (singleton (Str $ T.pack [c,c]) &lt;&gt; (prefix &lt;&gt; contents))</span></span></span>
+<span class="lineno">  310 </span>
+<span class="lineno">  311 </span>-- parse inlines til you hit one c or a sequence of two c's.
+<span class="lineno">  312 </span>-- If one c, emit Emph and then parse pTwo.
+<span class="lineno">  313 </span>-- if two c's, emit Strong and then parse pOne.
+<span class="lineno">  314 </span>pThree :: Char -&gt; ReferenceMap -&gt; Parser Inlines
+<span class="lineno">  315 </span><span class="decl"><span class="nottickedoff">pThree c refmap = do</span>
+<span class="lineno">  316 </span><span class="spaces">  </span><span class="nottickedoff">contents &lt;- msum &lt;$&gt; (many (nfbChar c &gt;&gt; pInline refmap))</span>
+<span class="lineno">  317 </span><span class="spaces">  </span><span class="nottickedoff">(string (T.pack [c,c]) &gt;&gt; (pOne c refmap (single Strong contents)))</span>
+<span class="lineno">  318 </span><span class="spaces">   </span><span class="nottickedoff">&lt;|&gt; (char c &gt;&gt; (pTwo c refmap (single Emph contents)))</span>
+<span class="lineno">  319 </span><span class="spaces">   </span><span class="nottickedoff">&lt;|&gt; return (singleton (Str $ T.pack [c,c,c]) &lt;&gt; contents)</span></span>
+<span class="lineno">  320 </span>
+<span class="lineno">  321 </span>-- Inline code span.
+<span class="lineno">  322 </span>pCode :: Parser Inlines
+<span class="lineno">  323 </span><span class="decl"><span class="istickedoff">pCode = fst &lt;$&gt; pCode'</span></span>
+<span class="lineno">  324 </span>
+<span class="lineno">  325 </span>-- this is factored out because it needed in pLinkLabel.
+<span class="lineno">  326 </span>pCode' :: Parser (Inlines, Text)
+<span class="lineno">  327 </span><span class="decl"><span class="istickedoff">pCode' = do</span>
+<span class="lineno">  328 </span><span class="spaces">  </span><span class="istickedoff">ticks &lt;- takeWhile1 (== '`')</span>
+<span class="lineno">  329 </span><span class="spaces">  </span><span class="istickedoff">let end = string ticks &gt;&gt; nfb (char '`')</span>
+<span class="lineno">  330 </span><span class="spaces">  </span><span class="istickedoff">let nonBacktickSpan = takeWhile1 (/= '`')</span>
+<span class="lineno">  331 </span><span class="spaces">  </span><span class="istickedoff">let backtickSpan = takeWhile1 (== '`')</span>
+<span class="lineno">  332 </span><span class="spaces">  </span><span class="istickedoff">contents &lt;- T.concat &lt;$&gt; manyTill (nonBacktickSpan &lt;|&gt; backtickSpan) end</span>
+<span class="lineno">  333 </span><span class="spaces">  </span><span class="istickedoff">return (singleton . Code . T.strip $ contents, ticks &lt;&gt; contents &lt;&gt; ticks)</span></span>
+<span class="lineno">  334 </span>
+<span class="lineno">  335 </span>pLink :: ReferenceMap -&gt; Parser Inlines
+<span class="lineno">  336 </span><span class="decl"><span class="istickedoff">pLink refmap = do</span>
+<span class="lineno">  337 </span><span class="spaces">  </span><span class="istickedoff">lab &lt;- pLinkLabel</span>
+<span class="lineno">  338 </span><span class="spaces">  </span><span class="istickedoff">let lab' = parseInlines <span class="nottickedoff">refmap</span> lab</span>
+<span class="lineno">  339 </span><span class="spaces">  </span><span class="istickedoff">pInlineLink lab' &lt;|&gt; pReferenceLink <span class="nottickedoff">refmap</span> lab lab'</span>
+<span class="lineno">  340 </span><span class="spaces">    </span><span class="istickedoff">-- fallback without backtracking if it's not a link:</span>
+<span class="lineno">  341 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; <span class="nottickedoff">return (singleton (Str &quot;[&quot;) &lt;&gt; lab' &lt;&gt; singleton (Str &quot;]&quot;))</span></span></span>
+<span class="lineno">  342 </span>
+<span class="lineno">  343 </span>-- An inline link: [label](/url &quot;optional title&quot;)
+<span class="lineno">  344 </span>pInlineLink :: Inlines -&gt; Parser Inlines
+<span class="lineno">  345 </span><span class="decl"><span class="istickedoff">pInlineLink lab = do</span>
+<span class="lineno">  346 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char '('</span>
+<span class="lineno">  347 </span><span class="spaces">  </span><span class="istickedoff">scanSpaces</span>
+<span class="lineno">  348 </span><span class="spaces">  </span><span class="istickedoff">url &lt;- pLinkUrl</span>
+<span class="lineno">  349 </span><span class="spaces">  </span><span class="istickedoff">tit &lt;- option &quot;&quot; $ scanSpnl *&gt; pLinkTitle &lt;* scanSpaces</span>
+<span class="lineno">  350 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char ')'</span>
+<span class="lineno">  351 </span><span class="spaces">  </span><span class="istickedoff">return $ singleton $ Link lab (Url url) tit</span></span>
+<span class="lineno">  352 </span>
+<span class="lineno">  353 </span>-- A reference link: [label], [foo][label], or [label][].
+<span class="lineno">  354 </span>pReferenceLink :: ReferenceMap -&gt; Text -&gt; Inlines -&gt; Parser Inlines
+<span class="lineno">  355 </span><span class="decl"><span class="istickedoff">pReferenceLink _ rawlab lab = do</span>
+<span class="lineno">  356 </span><span class="spaces">  </span><span class="istickedoff">ref &lt;- option rawlab $ scanSpnl &gt;&gt; pLinkLabel</span>
+<span class="lineno">  357 </span><span class="spaces">  </span><span class="istickedoff">return $ singleton $ Link lab (Ref ref) <span class="nottickedoff">&quot;&quot;</span></span></span>
+<span class="lineno">  358 </span>
+<span class="lineno">  359 </span>
+<span class="lineno">  360 </span>-- An image:  ! followed by a link.
+<span class="lineno">  361 </span>pImage :: ReferenceMap -&gt; Parser Inlines
+<span class="lineno">  362 </span><span class="decl"><span class="istickedoff">pImage refmap = do</span>
+<span class="lineno">  363 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char '!'</span>
+<span class="lineno">  364 </span><span class="spaces">  </span><span class="istickedoff">(linkToImage &lt;$&gt; pLink <span class="nottickedoff">refmap</span>) &lt;|&gt; return (singleton (Str &quot;!&quot;))</span></span>
+<span class="lineno">  365 </span>
+<span class="lineno">  366 </span>linkToImage :: Inlines -&gt; Inlines
+<span class="lineno">  367 </span><span class="decl"><span class="istickedoff">linkToImage ils =</span>
+<span class="lineno">  368 </span><span class="spaces">  </span><span class="istickedoff">case viewl ils of</span>
+<span class="lineno">  369 </span><span class="spaces">        </span><span class="istickedoff">(Link lab (Url url) tit :&lt; x)</span>
+<span class="lineno">  370 </span><span class="spaces">          </span><span class="istickedoff">| <span class="tickonlytrue">Seq.null x</span> -&gt; singleton (Image lab url tit)</span>
+<span class="lineno">  371 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt; singleton (Str &quot;!&quot;) &lt;&gt; ils</span></span>
+<span class="lineno">  372 </span>
+<span class="lineno">  373 </span>-- An entity.  We store these in a special inline element.
+<span class="lineno">  374 </span>-- This ensures that entities in the input come out as
+<span class="lineno">  375 </span>-- entities in the output. Alternatively we could simply
+<span class="lineno">  376 </span>-- convert them to characters and store them as Str inlines.
+<span class="lineno">  377 </span>pEntity :: Parser Inlines
+<span class="lineno">  378 </span><span class="decl"><span class="istickedoff">pEntity = do</span>
+<span class="lineno">  379 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char '&amp;'</span>
+<span class="lineno">  380 </span><span class="spaces">  </span><span class="istickedoff">res &lt;- pCharEntity &lt;|&gt; <span class="nottickedoff">pDecEntity</span> &lt;|&gt; <span class="nottickedoff">pHexEntity</span></span>
+<span class="lineno">  381 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char ';'</span>
+<span class="lineno">  382 </span><span class="spaces">  </span><span class="istickedoff">return $ singleton $ Entity $ &quot;&amp;&quot; &lt;&gt; res &lt;&gt; &quot;;&quot;</span></span>
+<span class="lineno">  383 </span>
+<span class="lineno">  384 </span>pCharEntity :: Parser Text
+<span class="lineno">  385 </span><span class="decl"><span class="istickedoff">pCharEntity = takeWhile1 (\c -&gt; isAscii c &amp;&amp; isLetter c)</span></span>
+<span class="lineno">  386 </span>
+<span class="lineno">  387 </span>pDecEntity :: Parser Text
+<span class="lineno">  388 </span><span class="decl"><span class="nottickedoff">pDecEntity = do</span>
+<span class="lineno">  389 </span><span class="spaces">  </span><span class="nottickedoff">_ &lt;- char '#'</span>
+<span class="lineno">  390 </span><span class="spaces">  </span><span class="nottickedoff">res &lt;- takeWhile1 isDigit</span>
+<span class="lineno">  391 </span><span class="spaces">  </span><span class="nottickedoff">return $ &quot;#&quot; &lt;&gt; res</span></span>
+<span class="lineno">  392 </span>
+<span class="lineno">  393 </span>pHexEntity :: Parser Text
+<span class="lineno">  394 </span><span class="decl"><span class="nottickedoff">pHexEntity = do</span>
+<span class="lineno">  395 </span><span class="spaces">  </span><span class="nottickedoff">_ &lt;- char '#'</span>
+<span class="lineno">  396 </span><span class="spaces">  </span><span class="nottickedoff">x &lt;- char 'X' &lt;|&gt; char 'x'</span>
+<span class="lineno">  397 </span><span class="spaces">  </span><span class="nottickedoff">res &lt;- takeWhile1 isHexDigit</span>
+<span class="lineno">  398 </span><span class="spaces">  </span><span class="nottickedoff">return $ &quot;#&quot; &lt;&gt; T.singleton x &lt;&gt; res</span></span>
+<span class="lineno">  399 </span>
+<span class="lineno">  400 </span>-- Raw HTML tag or comment.
+<span class="lineno">  401 </span>pRawHtml :: Parser Inlines
+<span class="lineno">  402 </span><span class="decl"><span class="istickedoff">pRawHtml = singleton . RawHtml &lt;$&gt; (snd &lt;$&gt; pHtmlTag &lt;|&gt; pHtmlComment)</span></span>
+<span class="lineno">  403 </span>
+<span class="lineno">  404 </span>-- A link like this: &lt;http://whatever.com&gt; or &lt;me@mydomain.edu&gt;.
+<span class="lineno">  405 </span>-- Markdown.pl does email obfuscation; we don't bother with that here.
+<span class="lineno">  406 </span>pAutolink :: Parser Inlines
+<span class="lineno">  407 </span><span class="decl"><span class="istickedoff">pAutolink = do</span>
+<span class="lineno">  408 </span><span class="spaces">  </span><span class="istickedoff">skip (=='&lt;')</span>
+<span class="lineno">  409 </span><span class="spaces">  </span><span class="istickedoff">s &lt;- takeWhile1 (\c -&gt; c /= ':' &amp;&amp; c /= '@')</span>
+<span class="lineno">  410 </span><span class="spaces">  </span><span class="istickedoff">rest &lt;- takeWhile1 (\c -&gt; c /='&gt;' &amp;&amp; c /= ' ')</span>
+<span class="lineno">  411 </span><span class="spaces">  </span><span class="istickedoff">skip (=='&gt;')</span>
+<span class="lineno">  412 </span><span class="spaces">  </span><span class="istickedoff">case <span class="nottickedoff">True</span> of</span>
+<span class="lineno">  413 </span><span class="spaces">       </span><span class="istickedoff">_ | <span class="tickonlyfalse">&quot;@&quot; `T.isPrefixOf` rest</span> -&gt; <span class="nottickedoff">return $ emailLink (s &lt;&gt; rest)</span></span>
+<span class="lineno">  414 </span><span class="spaces">         </span><span class="istickedoff">| <span class="tickonlytrue">s `Set.member` schemeSet</span> -&gt; return $ autoLink (s &lt;&gt; rest)</span>
+<span class="lineno">  415 </span><span class="spaces">         </span><span class="istickedoff">| <span class="nottickedoff">otherwise</span>   -&gt; <span class="nottickedoff">fail &quot;Unknown contents of &lt;&gt;&quot;</span></span></span>
+<span class="lineno">  416 </span>
+<span class="lineno">  417 </span>autoLink :: Text -&gt; Inlines
+<span class="lineno">  418 </span><span class="decl"><span class="istickedoff">autoLink t = singleton $ Link (toInlines t) (Url t) (T.empty)</span>
+<span class="lineno">  419 </span><span class="spaces">  </span><span class="istickedoff">where toInlines t' = case parse pToInlines t' of</span>
+<span class="lineno">  420 </span><span class="spaces">                         </span><span class="istickedoff">Right r   -&gt; r</span>
+<span class="lineno">  421 </span><span class="spaces">                         </span><span class="istickedoff">Left e    -&gt; <span class="nottickedoff">error $ &quot;autolink: &quot; ++ show e</span></span>
+<span class="lineno">  422 </span><span class="spaces">        </span><span class="istickedoff">pToInlines = mconcat &lt;$&gt; many strOrEntity</span>
+<span class="lineno">  423 </span><span class="spaces">        </span><span class="istickedoff">strOrEntity = ((singleton . Str) &lt;$&gt; takeWhile1 (/='&amp;'))</span>
+<span class="lineno">  424 </span><span class="spaces">                   </span><span class="istickedoff">&lt;|&gt; pEntity</span>
+<span class="lineno">  425 </span><span class="spaces">                   </span><span class="istickedoff">&lt;|&gt; (<span class="nottickedoff">(singleton . Str)</span> &lt;$&gt; string &quot;&amp;&quot;)</span></span>
+<span class="lineno">  426 </span>
+<span class="lineno">  427 </span>emailLink :: Text -&gt; Inlines
+<span class="lineno">  428 </span><span class="decl"><span class="nottickedoff">emailLink t = singleton $ Link (singleton $ Str t)</span>
+<span class="lineno">  429 </span><span class="spaces">                               </span><span class="nottickedoff">(Url $ &quot;mailto:&quot; &lt;&gt; t) (T.empty)</span></span>
+
+</pre>
+</body>
+</html>

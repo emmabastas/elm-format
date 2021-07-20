@@ -1,0 +1,142 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE OverloadedStrings #-}
+<span class="lineno">    2 </span>module Cheapskate.Util (
+<span class="lineno">    3 </span>    joinLines
+<span class="lineno">    4 </span>  , tabFilter
+<span class="lineno">    5 </span>  , isWhitespace
+<span class="lineno">    6 </span>  , isEscapable
+<span class="lineno">    7 </span>  , normalizeReference
+<span class="lineno">    8 </span>  , Scanner
+<span class="lineno">    9 </span>  , scanIndentSpace
+<span class="lineno">   10 </span>  , scanNonindentSpace
+<span class="lineno">   11 </span>  , scanSpacesToColumn
+<span class="lineno">   12 </span>  , scanChar
+<span class="lineno">   13 </span>  , scanBlankline
+<span class="lineno">   14 </span>  , scanSpaces
+<span class="lineno">   15 </span>  , scanSpnl
+<span class="lineno">   16 </span>  , nfb
+<span class="lineno">   17 </span>  , nfbChar
+<span class="lineno">   18 </span>  , upToCountChars
+<span class="lineno">   19 </span>  ) where
+<span class="lineno">   20 </span>
+<span class="lineno">   21 </span>import Data.Text (Text)
+<span class="lineno">   22 </span>import qualified Data.Text as T
+<span class="lineno">   23 </span>import Data.Char
+<span class="lineno">   24 </span>import Control.Applicative ()
+<span class="lineno">   25 </span>import Cheapskate.ParserCombinators
+<span class="lineno">   26 </span>
+<span class="lineno">   27 </span>-- Utility functions.
+<span class="lineno">   28 </span>
+<span class="lineno">   29 </span>-- Like T.unlines but does not add a final newline.
+<span class="lineno">   30 </span>-- Concatenates lines with newlines between.
+<span class="lineno">   31 </span>joinLines :: [Text] -&gt; Text
+<span class="lineno">   32 </span><span class="decl"><span class="istickedoff">joinLines = T.intercalate &quot;\n&quot;</span></span>
+<span class="lineno">   33 </span>
+<span class="lineno">   34 </span>-- Convert tabs to spaces using a 4-space tab stop.
+<span class="lineno">   35 </span>tabFilter :: Text -&gt; Text
+<span class="lineno">   36 </span><span class="decl"><span class="istickedoff">tabFilter = T.concat . pad . T.split (== '\t')</span>
+<span class="lineno">   37 </span><span class="spaces">  </span><span class="istickedoff">where pad []  = <span class="nottickedoff">[]</span></span>
+<span class="lineno">   38 </span><span class="spaces">        </span><span class="istickedoff">pad [t] = [t]</span>
+<span class="lineno">   39 </span><span class="spaces">        </span><span class="istickedoff">pad (t:ts) = <span class="nottickedoff">let tl = T.length t</span></span>
+<span class="lineno">   40 </span><span class="spaces">                         </span><span class="istickedoff"><span class="nottickedoff">n  = tl + 4 - (tl `mod` 4)</span></span>
+<span class="lineno">   41 </span><span class="spaces">                         </span><span class="istickedoff"><span class="nottickedoff">in  T.justifyLeft n ' ' t : pad ts</span></span></span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>-- These are the whitespace characters that are significant in
+<span class="lineno">   44 </span>-- parsing markdown. We can treat \160 (nonbreaking space) etc.
+<span class="lineno">   45 </span>-- as regular characters.  This function should be considerably
+<span class="lineno">   46 </span>-- faster than the unicode-aware isSpace from Data.Char.
+<span class="lineno">   47 </span>isWhitespace :: Char -&gt; Bool
+<span class="lineno">   48 </span><span class="decl"><span class="istickedoff">isWhitespace ' '  = True</span>
+<span class="lineno">   49 </span><span class="spaces"></span><span class="istickedoff">isWhitespace '\t' = <span class="nottickedoff">True</span></span>
+<span class="lineno">   50 </span><span class="spaces"></span><span class="istickedoff">isWhitespace '\n' = True</span>
+<span class="lineno">   51 </span><span class="spaces"></span><span class="istickedoff">isWhitespace '\r' = True</span>
+<span class="lineno">   52 </span><span class="spaces"></span><span class="istickedoff">isWhitespace _    = False</span></span>
+<span class="lineno">   53 </span>
+<span class="lineno">   54 </span>-- The original Markdown only allowed certain symbols
+<span class="lineno">   55 </span>-- to be backslash-escaped.  It was hard to remember
+<span class="lineno">   56 </span>-- which ones could be, so we now allow any ascii punctuation mark or
+<span class="lineno">   57 </span>-- symbol to be escaped, whether or not it has a use in Markdown.
+<span class="lineno">   58 </span>isEscapable :: Char -&gt; Bool
+<span class="lineno">   59 </span><span class="decl"><span class="istickedoff">isEscapable c = isAscii c &amp;&amp; (isSymbol c || isPunctuation c)</span></span>
+<span class="lineno">   60 </span>
+<span class="lineno">   61 </span>-- Link references are case sensitive and ignore line breaks
+<span class="lineno">   62 </span>-- and repeated spaces.
+<span class="lineno">   63 </span>-- So, [APPLES are good] == [Apples are good] ==
+<span class="lineno">   64 </span>-- [Apples
+<span class="lineno">   65 </span>-- are     good].
+<span class="lineno">   66 </span>normalizeReference :: Text -&gt; Text
+<span class="lineno">   67 </span><span class="decl"><span class="nottickedoff">normalizeReference = T.toCaseFold . T.concat . T.split isWhitespace</span></span>
+<span class="lineno">   68 </span>
+<span class="lineno">   69 </span>-- Scanners are implemented here as attoparsec parsers,
+<span class="lineno">   70 </span>-- which consume input and capture nothing.  They could easily
+<span class="lineno">   71 </span>-- be implemented as regexes in other languages, or hand-coded.
+<span class="lineno">   72 </span>-- With the exception of scanSpnl, they are all intended to
+<span class="lineno">   73 </span>-- operate on a single line of input (so endOfInput = endOfLine).
+<span class="lineno">   74 </span>type Scanner = Parser ()
+<span class="lineno">   75 </span>
+<span class="lineno">   76 </span>-- Scan four spaces.
+<span class="lineno">   77 </span>scanIndentSpace :: Scanner
+<span class="lineno">   78 </span><span class="decl"><span class="istickedoff">scanIndentSpace = <span class="nottickedoff">()</span> &lt;$ count 4 (skip (==' '))</span></span>
+<span class="lineno">   79 </span>
+<span class="lineno">   80 </span>scanSpacesToColumn :: Int -&gt; Scanner
+<span class="lineno">   81 </span><span class="decl"><span class="istickedoff">scanSpacesToColumn col = do</span>
+<span class="lineno">   82 </span><span class="spaces">  </span><span class="istickedoff">currentCol &lt;- column &lt;$&gt; getPosition</span>
+<span class="lineno">   83 </span><span class="spaces">  </span><span class="istickedoff">case col - currentCol of</span>
+<span class="lineno">   84 </span><span class="spaces">       </span><span class="istickedoff">n | n &gt;= 1 -&gt; <span class="nottickedoff">()</span> &lt;$ (count n (skip (==' ')))</span>
+<span class="lineno">   85 </span><span class="spaces">         </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span> -&gt; return <span class="nottickedoff">()</span></span></span>
+<span class="lineno">   86 </span>
+<span class="lineno">   87 </span>-- Scan 0-3 spaces.
+<span class="lineno">   88 </span>scanNonindentSpace :: Scanner
+<span class="lineno">   89 </span><span class="decl"><span class="istickedoff">scanNonindentSpace = <span class="nottickedoff">()</span> &lt;$ upToCountChars 3 (==' ')</span></span>
+<span class="lineno">   90 </span>
+<span class="lineno">   91 </span>-- Scan a specified character.
+<span class="lineno">   92 </span>scanChar :: Char -&gt; Scanner
+<span class="lineno">   93 </span><span class="decl"><span class="istickedoff">scanChar c = skip (== c) &gt;&gt; return <span class="nottickedoff">()</span></span></span>
+<span class="lineno">   94 </span>
+<span class="lineno">   95 </span>-- Scan a blankline.
+<span class="lineno">   96 </span>scanBlankline :: Scanner
+<span class="lineno">   97 </span><span class="decl"><span class="istickedoff">scanBlankline = scanSpaces *&gt; endOfInput</span></span>
+<span class="lineno">   98 </span>
+<span class="lineno">   99 </span>-- Scan 0 or more spaces
+<span class="lineno">  100 </span>scanSpaces :: Scanner
+<span class="lineno">  101 </span><span class="decl"><span class="istickedoff">scanSpaces = skipWhile (==' ')</span></span>
+<span class="lineno">  102 </span>
+<span class="lineno">  103 </span>-- Scan 0 or more spaces, and optionally a newline
+<span class="lineno">  104 </span>-- and more spaces.
+<span class="lineno">  105 </span>scanSpnl :: Scanner
+<span class="lineno">  106 </span><span class="decl"><span class="istickedoff">scanSpnl = scanSpaces *&gt; option <span class="nottickedoff">()</span> (char '\n' *&gt; <span class="nottickedoff">scanSpaces</span>)</span></span>
+<span class="lineno">  107 </span>
+<span class="lineno">  108 </span>-- Not followed by: Succeed without consuming input if the specified
+<span class="lineno">  109 </span>-- scanner would not succeed.
+<span class="lineno">  110 </span>nfb :: Parser a -&gt; Scanner
+<span class="lineno">  111 </span><span class="decl"><span class="istickedoff">nfb = notFollowedBy</span></span>
+<span class="lineno">  112 </span>
+<span class="lineno">  113 </span>-- Succeed if not followed by a character. Consumes no input.
+<span class="lineno">  114 </span>nfbChar :: Char -&gt; Scanner
+<span class="lineno">  115 </span><span class="decl"><span class="istickedoff">nfbChar c = nfb (skip (==c))</span></span>
+<span class="lineno">  116 </span>
+<span class="lineno">  117 </span>upToCountChars :: Int -&gt; (Char -&gt; Bool) -&gt; Parser Text
+<span class="lineno">  118 </span><span class="decl"><span class="istickedoff">upToCountChars cnt f =</span>
+<span class="lineno">  119 </span><span class="spaces">  </span><span class="istickedoff">scan 0 (\n c -&gt; if n &lt; cnt &amp;&amp; f c then Just (n+1) else Nothing)</span></span>
+
+</pre>
+</body>
+</html>

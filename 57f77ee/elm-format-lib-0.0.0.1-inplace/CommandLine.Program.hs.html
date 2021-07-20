@@ -1,0 +1,173 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module CommandLine.Program (ProgramResult(..), ProgramIO, run, failed, CommandLine.Program.error, showUsage, liftEither, liftM, liftME, mapError) where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>-- Common handling for command line programs
+<span class="lineno">    4 </span>
+<span class="lineno">    5 </span>import Prelude ()
+<span class="lineno">    6 </span>import Relude hiding (putStrLn, exitSuccess, exitFailure)
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>import CommandLine.InfoFormatter (ToConsole(..))
+<span class="lineno">    9 </span>import CommandLine.World
+<span class="lineno">   10 </span>import qualified Data.Text as Text
+<span class="lineno">   11 </span>import System.Exit (ExitCode(..))
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>import qualified Options.Applicative as OptParse
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>
+<span class="lineno">   16 </span>class MapError f where
+<span class="lineno">   17 </span>    mapError :: (x -&gt; y) -&gt; f x a -&gt; f y a
+<span class="lineno">   18 </span>
+<span class="lineno">   19 </span>
+<span class="lineno">   20 </span>data ProgramResult err a
+<span class="lineno">   21 </span>    = ShowUsage
+<span class="lineno">   22 </span>    | ProgramError err
+<span class="lineno">   23 </span>    | ProgramSuccess a
+<span class="lineno">   24 </span>    | ProgramFailed
+<span class="lineno">   25 </span>    deriving (<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">   26 </span>
+<span class="lineno">   27 </span>instance MapError ProgramResult where
+<span class="lineno">   28 </span>    <span class="decl"><span class="nottickedoff">mapError f = \case</span>
+<span class="lineno">   29 </span><span class="spaces">        </span><span class="nottickedoff">ShowUsage -&gt; ShowUsage</span>
+<span class="lineno">   30 </span><span class="spaces">        </span><span class="nottickedoff">ProgramError x -&gt; ProgramError $ f x</span>
+<span class="lineno">   31 </span><span class="spaces">        </span><span class="nottickedoff">ProgramSuccess a -&gt; ProgramSuccess a</span>
+<span class="lineno">   32 </span><span class="spaces">        </span><span class="nottickedoff">ProgramFailed -&gt; ProgramFailed</span></span>
+<span class="lineno">   33 </span>
+<span class="lineno">   34 </span>instance Applicative (ProgramResult err) where
+<span class="lineno">   35 </span>    <span class="decl"><span class="istickedoff">pure a = ProgramSuccess a</span></span>
+<span class="lineno">   36 </span>    <span class="decl"><span class="nottickedoff">liftA2 f (ProgramSuccess a) (ProgramSuccess b) = ProgramSuccess (f a b)</span>
+<span class="lineno">   37 </span><span class="spaces">    </span><span class="nottickedoff">liftA2 _ (ProgramError err) _ = ProgramError err</span>
+<span class="lineno">   38 </span><span class="spaces">    </span><span class="nottickedoff">liftA2 _ ProgramFailed _ = ProgramFailed</span>
+<span class="lineno">   39 </span><span class="spaces">    </span><span class="nottickedoff">liftA2 _ ShowUsage _ = ShowUsage</span>
+<span class="lineno">   40 </span><span class="spaces">    </span><span class="nottickedoff">liftA2 _ _ (ProgramError err) = ProgramError err</span>
+<span class="lineno">   41 </span><span class="spaces">    </span><span class="nottickedoff">liftA2 _ _ ProgramFailed = ProgramFailed</span>
+<span class="lineno">   42 </span><span class="spaces">    </span><span class="nottickedoff">liftA2 _ _ ShowUsage = ShowUsage</span></span>
+<span class="lineno">   43 </span>
+<span class="lineno">   44 </span>instance Monad (ProgramResult err) where
+<span class="lineno">   45 </span>    <span class="decl"><span class="nottickedoff">ShowUsage &gt;&gt;= _ = ShowUsage</span>
+<span class="lineno">   46 </span><span class="spaces">    </span><span class="nottickedoff">ProgramFailed &gt;&gt;= _ = ProgramFailed</span>
+<span class="lineno">   47 </span><span class="spaces">    </span><span class="nottickedoff">(ProgramError err) &gt;&gt;= _ = ProgramError err</span>
+<span class="lineno">   48 </span><span class="spaces">    </span><span class="nottickedoff">(ProgramSuccess a) &gt;&gt;= f = f a</span></span>
+<span class="lineno">   49 </span>
+<span class="lineno">   50 </span>
+<span class="lineno">   51 </span>newtype ProgramIO m x a =
+<span class="lineno">   52 </span>    ProgramIO (m (ProgramResult x a))
+<span class="lineno">   53 </span>    deriving (<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>instance Functor m =&gt; MapError (ProgramIO m) where
+<span class="lineno">   56 </span>    <span class="decl"><span class="nottickedoff">mapError f (ProgramIO m) = ProgramIO (fmap (mapError f) m)</span></span>
+<span class="lineno">   57 </span>
+<span class="lineno">   58 </span>instance Monad m =&gt; Applicative (ProgramIO m x) where
+<span class="lineno">   59 </span>    <span class="decl"><span class="istickedoff">pure a = ProgramIO $ return $ pure a</span></span>
+<span class="lineno">   60 </span>    <span class="decl"><span class="nottickedoff">liftA2 f (ProgramIO a) (ProgramIO b) =</span>
+<span class="lineno">   61 </span><span class="spaces">        </span><span class="nottickedoff">ProgramIO $ do</span>
+<span class="lineno">   62 </span><span class="spaces">            </span><span class="nottickedoff">a' &lt;- a</span>
+<span class="lineno">   63 </span><span class="spaces">            </span><span class="nottickedoff">b' &lt;- b</span>
+<span class="lineno">   64 </span><span class="spaces">            </span><span class="nottickedoff">return $ liftA2 f a' b'</span></span>
+<span class="lineno">   65 </span>
+<span class="lineno">   66 </span>instance Monad m =&gt; Monad (ProgramIO m x) where
+<span class="lineno">   67 </span>    <span class="decl"><span class="istickedoff">(ProgramIO m) &gt;&gt;= f = ProgramIO (m &gt;&gt;= f')</span>
+<span class="lineno">   68 </span><span class="spaces">        </span><span class="istickedoff">where</span>
+<span class="lineno">   69 </span><span class="spaces">            </span><span class="istickedoff">f' r =</span>
+<span class="lineno">   70 </span><span class="spaces">                </span><span class="istickedoff">case r of</span>
+<span class="lineno">   71 </span><span class="spaces">                    </span><span class="istickedoff">ShowUsage -&gt; <span class="nottickedoff">return $ ShowUsage</span></span>
+<span class="lineno">   72 </span><span class="spaces">                    </span><span class="istickedoff">ProgramError x -&gt; return $ ProgramError x</span>
+<span class="lineno">   73 </span><span class="spaces">                    </span><span class="istickedoff">ProgramFailed -&gt; <span class="nottickedoff">return $ ProgramFailed</span></span>
+<span class="lineno">   74 </span><span class="spaces">                    </span><span class="istickedoff">ProgramSuccess a -&gt; (\(ProgramIO z) -&gt; z) $ f a</span></span>
+<span class="lineno">   75 </span>
+<span class="lineno">   76 </span>failed :: Applicative m =&gt; ProgramIO m x a
+<span class="lineno">   77 </span><span class="decl"><span class="istickedoff">failed = ProgramIO $ pure $ ProgramFailed</span></span>
+<span class="lineno">   78 </span>
+<span class="lineno">   79 </span>error :: Applicative m =&gt; x -&gt; ProgramIO m x a
+<span class="lineno">   80 </span><span class="decl"><span class="istickedoff">error x = ProgramIO $ pure $ ProgramError x</span></span>
+<span class="lineno">   81 </span>
+<span class="lineno">   82 </span>showUsage :: Applicative m =&gt; ProgramIO m x a
+<span class="lineno">   83 </span><span class="decl"><span class="nottickedoff">showUsage = ProgramIO $ pure $ ShowUsage</span></span>
+<span class="lineno">   84 </span>
+<span class="lineno">   85 </span>liftEither :: Applicative m =&gt; Either x a -&gt; ProgramIO m x a
+<span class="lineno">   86 </span><span class="decl"><span class="istickedoff">liftEither (Left x) = <span class="nottickedoff">ProgramIO $ pure $ ProgramError x</span></span>
+<span class="lineno">   87 </span><span class="spaces"></span><span class="istickedoff">liftEither (Right a) = ProgramIO $ pure $ ProgramSuccess a</span></span>
+<span class="lineno">   88 </span>
+<span class="lineno">   89 </span>liftM :: Functor m =&gt; m a -&gt; ProgramIO m x a
+<span class="lineno">   90 </span><span class="decl"><span class="istickedoff">liftM m = ProgramIO (ProgramSuccess &lt;$&gt; m)</span></span>
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>liftME :: Monad m =&gt; m (Either x a) -&gt; ProgramIO m x a
+<span class="lineno">   93 </span><span class="decl"><span class="istickedoff">liftME m = ProgramIO (m &gt;&gt;= ((\(ProgramIO z) -&gt; z) . liftEither))</span></span>
+<span class="lineno">   94 </span>
+<span class="lineno">   95 </span>
+<span class="lineno">   96 </span>run ::
+<span class="lineno">   97 </span>    World m =&gt;
+<span class="lineno">   98 </span>    ToConsole err =&gt;
+<span class="lineno">   99 </span>    OptParse.ParserInfo flags
+<span class="lineno">  100 </span>    -&gt; (flags -&gt; ProgramIO m err ())
+<span class="lineno">  101 </span>    -&gt; [String]
+<span class="lineno">  102 </span>    -&gt; m ()
+<span class="lineno">  103 </span><span class="decl"><span class="istickedoff">run flagsParser run' args =</span>
+<span class="lineno">  104 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  105 </span><span class="spaces">        </span><span class="istickedoff">parsePreferences =</span>
+<span class="lineno">  106 </span><span class="spaces">            </span><span class="istickedoff">OptParse.prefs (mempty &lt;&gt; OptParse.showHelpOnError)</span>
+<span class="lineno">  107 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  108 </span><span class="spaces">        </span><span class="istickedoff">parseFlags =</span>
+<span class="lineno">  109 </span><span class="spaces">            </span><span class="istickedoff">OptParse.execParserPure parsePreferences flagsParser</span>
+<span class="lineno">  110 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  111 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">  112 </span><span class="spaces">        </span><span class="istickedoff">flags &lt;- handleParseResult $ parseFlags args</span>
+<span class="lineno">  113 </span><span class="spaces">        </span><span class="istickedoff">case flags of</span>
+<span class="lineno">  114 </span><span class="spaces">            </span><span class="istickedoff">Nothing -&gt; <span class="nottickedoff">return ()</span></span>
+<span class="lineno">  115 </span><span class="spaces">            </span><span class="istickedoff">Just flags' -&gt;</span>
+<span class="lineno">  116 </span><span class="spaces">                </span><span class="istickedoff">do</span>
+<span class="lineno">  117 </span><span class="spaces">                    </span><span class="istickedoff">result &lt;- (\(ProgramIO m) -&gt; m) $ run' flags'</span>
+<span class="lineno">  118 </span><span class="spaces">                    </span><span class="istickedoff">case result of</span>
+<span class="lineno">  119 </span><span class="spaces">                        </span><span class="istickedoff">ShowUsage -&gt;</span>
+<span class="lineno">  120 </span><span class="spaces">                            </span><span class="istickedoff"><span class="nottickedoff">(handleParseResult $ parseFlags [&quot;--help&quot;])</span></span>
+<span class="lineno">  121 </span><span class="spaces">                                </span><span class="istickedoff"><span class="nottickedoff">-- TODO: handleParseResult is exitSuccess, so we never get to exitFailure</span></span>
+<span class="lineno">  122 </span><span class="spaces">                                </span><span class="istickedoff"><span class="nottickedoff">&gt;&gt; exitFailure</span></span>
+<span class="lineno">  123 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  124 </span><span class="spaces">                        </span><span class="istickedoff">ProgramError err -&gt;</span>
+<span class="lineno">  125 </span><span class="spaces">                            </span><span class="istickedoff">putStrLnStderr (toConsole err)</span>
+<span class="lineno">  126 </span><span class="spaces">                                </span><span class="istickedoff">&gt;&gt; exitFailure</span>
+<span class="lineno">  127 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  128 </span><span class="spaces">                        </span><span class="istickedoff">ProgramSuccess () -&gt;</span>
+<span class="lineno">  129 </span><span class="spaces">                            </span><span class="istickedoff">exitSuccess</span>
+<span class="lineno">  130 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  131 </span><span class="spaces">                        </span><span class="istickedoff">ProgramFailed -&gt;</span>
+<span class="lineno">  132 </span><span class="spaces">                            </span><span class="istickedoff">exitFailure</span></span>
+<span class="lineno">  133 </span>
+<span class="lineno">  134 </span>
+<span class="lineno">  135 </span>{-| copied from Options.Applicative -}
+<span class="lineno">  136 </span>handleParseResult :: World m =&gt; OptParse.ParserResult a -&gt; m (Maybe a)
+<span class="lineno">  137 </span><span class="decl"><span class="istickedoff">handleParseResult (OptParse.Success a) = return (Just a)</span>
+<span class="lineno">  138 </span><span class="spaces"></span><span class="istickedoff">handleParseResult (OptParse.Failure failure) = <span class="nottickedoff">do</span></span>
+<span class="lineno">  139 </span><span class="spaces">    </span><span class="istickedoff"><span class="nottickedoff">progn &lt;- getProgName</span></span>
+<span class="lineno">  140 </span><span class="spaces">    </span><span class="istickedoff"><span class="nottickedoff">let (msg, exit) = OptParse.renderFailure failure (Text.unpack progn)</span></span>
+<span class="lineno">  141 </span><span class="spaces">    </span><span class="istickedoff"><span class="nottickedoff">case exit of</span></span>
+<span class="lineno">  142 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">ExitSuccess -&gt; putStrLn (Text.pack msg) *&gt; exitSuccess *&gt; return Nothing</span></span>
+<span class="lineno">  143 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">_           -&gt; putStrLnStderr (Text.pack msg) *&gt; exitFailure *&gt; return Nothing</span></span>
+<span class="lineno">  144 </span><span class="spaces"></span><span class="istickedoff">handleParseResult (OptParse.CompletionInvoked _) =</span>
+<span class="lineno">  145 </span><span class="spaces">    </span><span class="istickedoff">-- do</span>
+<span class="lineno">  146 </span><span class="spaces">    </span><span class="istickedoff">--     progn &lt;- getProgName</span>
+<span class="lineno">  147 </span><span class="spaces">    </span><span class="istickedoff">--     msg &lt;- OptParse.execCompletion compl progn</span>
+<span class="lineno">  148 </span><span class="spaces">    </span><span class="istickedoff">--     putStr msg</span>
+<span class="lineno">  149 </span><span class="spaces">    </span><span class="istickedoff">--     const undefined &lt;$&gt; exitSuccess</span>
+<span class="lineno">  150 </span><span class="spaces">    </span><span class="istickedoff"><span class="nottickedoff">Relude.error &quot;Shell completion not yet implemented&quot;</span></span></span>
+
+</pre>
+</body>
+</html>

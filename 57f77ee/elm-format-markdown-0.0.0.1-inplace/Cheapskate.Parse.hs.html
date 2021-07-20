@@ -1,0 +1,659 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE OverloadedStrings, PatternGuards #-}
+<span class="lineno">    2 </span>module Cheapskate.Parse (
+<span class="lineno">    3 </span>         markdown
+<span class="lineno">    4 </span>       ) where
+<span class="lineno">    5 </span>import Cheapskate.ParserCombinators
+<span class="lineno">    6 </span>import Cheapskate.Util
+<span class="lineno">    7 </span>import Cheapskate.Inlines
+<span class="lineno">    8 </span>import Cheapskate.Types
+<span class="lineno">    9 </span>import Data.Char hiding (Space)
+<span class="lineno">   10 </span>import qualified Data.Set as Set
+<span class="lineno">   11 </span>import Prelude hiding (takeWhile)
+<span class="lineno">   12 </span>import Data.Maybe (mapMaybe)
+<span class="lineno">   13 </span>import Data.Text (Text)
+<span class="lineno">   14 </span>import qualified Data.Text as T
+<span class="lineno">   15 </span>import Data.Foldable (toList)
+<span class="lineno">   16 </span>import Data.Sequence ((|&gt;), viewr, ViewR(..), singleton, Seq)
+<span class="lineno">   17 </span>import qualified Data.Sequence as Seq
+<span class="lineno">   18 </span>import Control.Monad.RWS
+<span class="lineno">   19 </span>import Control.Applicative
+<span class="lineno">   20 </span>import qualified Data.Map as M
+<span class="lineno">   21 </span>import Data.List (intercalate)
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>import Debug.Trace
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>-- | Parses the input as a markdown document.  Note that 'Doc' is an instance
+<span class="lineno">   26 </span>-- of 'ToMarkup', so the document can be converted to 'Html' using 'toHtml'.
+<span class="lineno">   27 </span>-- A simple 'Text' to 'Html' filter would be
+<span class="lineno">   28 </span>--
+<span class="lineno">   29 </span>-- &gt; markdownToHtml :: Text -&gt; Html
+<span class="lineno">   30 </span>-- &gt; markdownToHtml = toHtml . markdown def
+<span class="lineno">   31 </span>markdown :: Options -&gt; Text -&gt; Doc
+<span class="lineno">   32 </span><span class="decl"><span class="istickedoff">markdown opts</span>
+<span class="lineno">   33 </span><span class="spaces">  </span><span class="istickedoff">| <span class="tickonlyfalse">debug opts</span> = <span class="nottickedoff">(\x -&gt; trace (show x) $ Doc opts mempty) . processLines</span></span>
+<span class="lineno">   34 </span><span class="spaces">  </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span>  = Doc <span class="nottickedoff">opts</span> . processDocument . processLines</span></span>
+<span class="lineno">   35 </span>
+<span class="lineno">   36 </span>-- General parsing strategy:
+<span class="lineno">   37 </span>--
+<span class="lineno">   38 </span>-- Step 1:  processLines
+<span class="lineno">   39 </span>--
+<span class="lineno">   40 </span>-- We process the input line by line.  Each line modifies the
+<span class="lineno">   41 </span>-- container stack, by adding a leaf to the current open container,
+<span class="lineno">   42 </span>-- sometimes after closing old containers and/or opening new ones.
+<span class="lineno">   43 </span>--
+<span class="lineno">   44 </span>-- To open a container is to add it to the top of the container stack,
+<span class="lineno">   45 </span>-- so that new content will be added under this container.
+<span class="lineno">   46 </span>-- To close a container is to remove it from the container stack and
+<span class="lineno">   47 </span>-- make it a child of the container above it on the container stack.
+<span class="lineno">   48 </span>--
+<span class="lineno">   49 </span>-- When all the input has been processed, we close all open containers
+<span class="lineno">   50 </span>-- except the root (Document) container.  At this point we should also
+<span class="lineno">   51 </span>-- have a ReferenceMap containing any defined link references.
+<span class="lineno">   52 </span>--
+<span class="lineno">   53 </span>-- Step 2:  processDocument
+<span class="lineno">   54 </span>--
+<span class="lineno">   55 </span>-- We then convert this container structure into an AST.  This principally
+<span class="lineno">   56 </span>-- involves (a) gathering consecutive ListItem containers into lists, (b)
+<span class="lineno">   57 </span>-- gathering TextLine nodes that don't belong to verbatim containers into
+<span class="lineno">   58 </span>-- paragraphs, and (c) parsing the inline contents of non-verbatim TextLines.
+<span class="lineno">   59 </span>
+<span class="lineno">   60 </span>--------
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>-- Container stack definitions:
+<span class="lineno">   63 </span>
+<span class="lineno">   64 </span>data ContainerStack =
+<span class="lineno">   65 </span>  ContainerStack Container {- top -} [Container] {- rest -}
+<span class="lineno">   66 </span>
+<span class="lineno">   67 </span>type LineNumber   = Int
+<span class="lineno">   68 </span>
+<span class="lineno">   69 </span>-- Generic type for a container or a leaf.
+<span class="lineno">   70 </span>data Elt = C Container
+<span class="lineno">   71 </span>         | L LineNumber Leaf
+<span class="lineno">   72 </span>         deriving <span class="decl"><span class="nottickedoff">Show</span></span>
+<span class="lineno">   73 </span>
+<span class="lineno">   74 </span>data Container = Container{
+<span class="lineno">   75 </span>                     <span class="istickedoff"><span class="decl"><span class="istickedoff">containerType</span></span></span> :: ContainerType
+<span class="lineno">   76 </span>                   , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">children</span></span></span>      :: Seq Elt
+<span class="lineno">   77 </span>                   }
+<span class="lineno">   78 </span>
+<span class="lineno">   79 </span>data ContainerType = Document
+<span class="lineno">   80 </span>                   | BlockQuote
+<span class="lineno">   81 </span>                   | ListItem { <span class="istickedoff"><span class="nottickedoff"><span class="decl"><span class="istickedoff">markerColumn</span></span></span></span> :: Int
+<span class="lineno">   82 </span>                              , <span class="istickedoff"><span class="nottickedoff"><span class="decl"><span class="istickedoff">padding</span></span></span></span>      :: Int
+<span class="lineno">   83 </span>                              , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">listType</span></span></span>     :: ListType }
+<span class="lineno">   84 </span>                   | FencedCode { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">startColumn</span></span></span> :: Int
+<span class="lineno">   85 </span>                                , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">fence</span></span></span> :: Text
+<span class="lineno">   86 </span>                                , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">info</span></span></span> :: Text }
+<span class="lineno">   87 </span>                   | IndentedCode
+<span class="lineno">   88 </span>                   | RawHtmlBlock
+<span class="lineno">   89 </span>                   | Reference
+<span class="lineno">   90 </span>                   deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>instance Show Container where
+<span class="lineno">   93 </span>  <span class="decl"><span class="nottickedoff">show c = show (containerType c) ++ &quot;\n&quot; ++</span>
+<span class="lineno">   94 </span><span class="spaces">    </span><span class="nottickedoff">nest 2 (intercalate &quot;\n&quot; (map showElt $ toList $ children c))</span></span>
+<span class="lineno">   95 </span>
+<span class="lineno">   96 </span>nest :: Int -&gt; String -&gt; String
+<span class="lineno">   97 </span><span class="decl"><span class="nottickedoff">nest num = intercalate &quot;\n&quot; . map ((replicate num ' ') ++) . lines</span></span>
+<span class="lineno">   98 </span>
+<span class="lineno">   99 </span>showElt :: Elt -&gt; String
+<span class="lineno">  100 </span><span class="decl"><span class="nottickedoff">showElt (C c) = show c</span>
+<span class="lineno">  101 </span><span class="spaces"></span><span class="nottickedoff">showElt (L _ (TextLine s)) = show s</span>
+<span class="lineno">  102 </span><span class="spaces"></span><span class="nottickedoff">showElt (L _ lf) = show lf</span></span>
+<span class="lineno">  103 </span>
+<span class="lineno">  104 </span>-- Scanners that must be satisfied if the current open container
+<span class="lineno">  105 </span>-- is to be continued on a new line (ignoring lazy continuations).
+<span class="lineno">  106 </span>containerContinue :: Container -&gt; Scanner
+<span class="lineno">  107 </span><span class="decl"><span class="istickedoff">containerContinue c =</span>
+<span class="lineno">  108 </span><span class="spaces">  </span><span class="istickedoff">case containerType c of</span>
+<span class="lineno">  109 </span><span class="spaces">       </span><span class="istickedoff">BlockQuote     -&gt; scanNonindentSpace *&gt; scanBlockquoteStart</span>
+<span class="lineno">  110 </span><span class="spaces">       </span><span class="istickedoff">IndentedCode   -&gt; scanIndentSpace</span>
+<span class="lineno">  111 </span><span class="spaces">       </span><span class="istickedoff">FencedCode{startColumn = col} -&gt;</span>
+<span class="lineno">  112 </span><span class="spaces">                         </span><span class="istickedoff">scanSpacesToColumn col</span>
+<span class="lineno">  113 </span><span class="spaces">       </span><span class="istickedoff">RawHtmlBlock   -&gt; nfb scanBlankline</span>
+<span class="lineno">  114 </span><span class="spaces">       </span><span class="istickedoff">li@ListItem{}  -&gt; scanBlankline</span>
+<span class="lineno">  115 </span><span class="spaces">                         </span><span class="istickedoff">&lt;|&gt;</span>
+<span class="lineno">  116 </span><span class="spaces">                         </span><span class="istickedoff">(do scanSpacesToColumn</span>
+<span class="lineno">  117 </span><span class="spaces">                                </span><span class="istickedoff">(markerColumn li + 1)</span>
+<span class="lineno">  118 </span><span class="spaces">                             </span><span class="istickedoff">_ &lt;- upToCountChars (padding li - 1)</span>
+<span class="lineno">  119 </span><span class="spaces">                                </span><span class="istickedoff">(==' ')</span>
+<span class="lineno">  120 </span><span class="spaces">                             </span><span class="istickedoff">return <span class="nottickedoff">()</span>)</span>
+<span class="lineno">  121 </span><span class="spaces">       </span><span class="istickedoff">Reference{}    -&gt; nfb scanBlankline &gt;&gt;</span>
+<span class="lineno">  122 </span><span class="spaces">                         </span><span class="istickedoff">nfb (scanNonindentSpace *&gt; scanReference)</span>
+<span class="lineno">  123 </span><span class="spaces">       </span><span class="istickedoff">_              -&gt; return <span class="nottickedoff">()</span></span></span>
+<span class="lineno">  124 </span>{-# INLINE containerContinue #-}
+<span class="lineno">  125 </span>
+<span class="lineno">  126 </span>-- Defines parsers that open new containers.
+<span class="lineno">  127 </span>containerStart :: Bool -&gt; Parser ContainerType
+<span class="lineno">  128 </span><span class="decl"><span class="istickedoff">containerStart _lastLineIsText = scanNonindentSpace *&gt;</span>
+<span class="lineno">  129 </span><span class="spaces">   </span><span class="istickedoff">(  (BlockQuote &lt;$ scanBlockquoteStart)</span>
+<span class="lineno">  130 </span><span class="spaces">  </span><span class="istickedoff">&lt;|&gt; parseListMarker</span>
+<span class="lineno">  131 </span><span class="spaces">   </span><span class="istickedoff">)</span></span>
+<span class="lineno">  132 </span>
+<span class="lineno">  133 </span>-- Defines parsers that open new verbatim containers (containers
+<span class="lineno">  134 </span>-- that take only TextLine and BlankLine as children).
+<span class="lineno">  135 </span>verbatimContainerStart :: Bool -&gt; Parser ContainerType
+<span class="lineno">  136 </span><span class="decl"><span class="istickedoff">verbatimContainerStart lastLineIsText = scanNonindentSpace *&gt;</span>
+<span class="lineno">  137 </span><span class="spaces">   </span><span class="istickedoff">(  parseCodeFence</span>
+<span class="lineno">  138 </span><span class="spaces">  </span><span class="istickedoff">&lt;|&gt; (guard (not lastLineIsText) *&gt; (IndentedCode &lt;$ char ' ' &lt;* nfb scanBlankline))</span>
+<span class="lineno">  139 </span><span class="spaces">  </span><span class="istickedoff">&lt;|&gt; (guard (not lastLineIsText) *&gt; (RawHtmlBlock &lt;$ parseHtmlBlockStart))</span>
+<span class="lineno">  140 </span><span class="spaces">  </span><span class="istickedoff">&lt;|&gt; (guard (not lastLineIsText) *&gt; (Reference &lt;$ scanReference))</span>
+<span class="lineno">  141 </span><span class="spaces">   </span><span class="istickedoff">)</span></span>
+<span class="lineno">  142 </span>
+<span class="lineno">  143 </span>-- Leaves of the container structure (they don't take children).
+<span class="lineno">  144 </span>data Leaf = TextLine Text
+<span class="lineno">  145 </span>          | BlankLine Text
+<span class="lineno">  146 </span>          | ATXHeader Int Text
+<span class="lineno">  147 </span>          | SetextHeader Int Text
+<span class="lineno">  148 </span>          | Rule
+<span class="lineno">  149 </span>          deriving (<span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">  150 </span>
+<span class="lineno">  151 </span>type ContainerM = RWS () ReferenceMap ContainerStack
+<span class="lineno">  152 </span>
+<span class="lineno">  153 </span>-- Close the whole container stack, leaving only the root Document container.
+<span class="lineno">  154 </span>closeStack :: ContainerM Container
+<span class="lineno">  155 </span><span class="decl"><span class="istickedoff">closeStack = do</span>
+<span class="lineno">  156 </span><span class="spaces">  </span><span class="istickedoff">ContainerStack top rest  &lt;- get</span>
+<span class="lineno">  157 </span><span class="spaces">  </span><span class="istickedoff">if null rest</span>
+<span class="lineno">  158 </span><span class="spaces">     </span><span class="istickedoff">then return top</span>
+<span class="lineno">  159 </span><span class="spaces">     </span><span class="istickedoff">else closeContainer &gt;&gt; closeStack</span></span>
+<span class="lineno">  160 </span>
+<span class="lineno">  161 </span>-- Close the top container on the stack.  If the container is a Reference
+<span class="lineno">  162 </span>-- container, attempt to parse the reference and update the reference map.
+<span class="lineno">  163 </span>-- If it is a list item container, move a final BlankLine outside the list
+<span class="lineno">  164 </span>-- item.
+<span class="lineno">  165 </span>closeContainer :: ContainerM ()
+<span class="lineno">  166 </span><span class="decl"><span class="istickedoff">closeContainer = do</span>
+<span class="lineno">  167 </span><span class="spaces">  </span><span class="istickedoff">ContainerStack top rest &lt;- get</span>
+<span class="lineno">  168 </span><span class="spaces">  </span><span class="istickedoff">case top of</span>
+<span class="lineno">  169 </span><span class="spaces">       </span><span class="istickedoff">(Container Reference{} cs'') -&gt;</span>
+<span class="lineno">  170 </span><span class="spaces">         </span><span class="istickedoff">case parse pReference</span>
+<span class="lineno">  171 </span><span class="spaces">               </span><span class="istickedoff">(T.strip $ joinLines $ map extractText $ toList cs'') of</span>
+<span class="lineno">  172 </span><span class="spaces">              </span><span class="istickedoff">Right (lab, lnk, tit) -&gt; do</span>
+<span class="lineno">  173 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">tell (M.singleton (normalizeReference lab) (lnk, tit))</span></span>
+<span class="lineno">  174 </span><span class="spaces">                </span><span class="istickedoff">case rest of</span>
+<span class="lineno">  175 </span><span class="spaces">                    </span><span class="istickedoff">(Container ct' cs' : rs) -&gt;</span>
+<span class="lineno">  176 </span><span class="spaces">                      </span><span class="istickedoff">put $ ContainerStack (Container ct' (cs' |&gt; C top)) rs</span>
+<span class="lineno">  177 </span><span class="spaces">                    </span><span class="istickedoff">[] -&gt; <span class="nottickedoff">return ()</span></span>
+<span class="lineno">  178 </span><span class="spaces">              </span><span class="istickedoff">Left _ -&gt; -- pass over in silence if ref doesn't parse?</span>
+<span class="lineno">  179 </span><span class="spaces">                        </span><span class="istickedoff"><span class="nottickedoff">case rest of</span></span>
+<span class="lineno">  180 </span><span class="spaces">                             </span><span class="istickedoff"><span class="nottickedoff">(c:cs) -&gt; put $ ContainerStack c cs</span></span>
+<span class="lineno">  181 </span><span class="spaces">                             </span><span class="istickedoff"><span class="nottickedoff">[]     -&gt; return ()</span></span>
+<span class="lineno">  182 </span><span class="spaces">       </span><span class="istickedoff">(Container li@ListItem{} cs'') -&gt;</span>
+<span class="lineno">  183 </span><span class="spaces">         </span><span class="istickedoff">case rest of</span>
+<span class="lineno">  184 </span><span class="spaces">              </span><span class="istickedoff">-- move final BlankLine outside of list item</span>
+<span class="lineno">  185 </span><span class="spaces">              </span><span class="istickedoff">(Container ct' cs' : rs) -&gt;</span>
+<span class="lineno">  186 </span><span class="spaces">                       </span><span class="istickedoff">case viewr cs'' of</span>
+<span class="lineno">  187 </span><span class="spaces">                            </span><span class="istickedoff">(zs :&gt; b@(L _ BlankLine{})) -&gt;</span>
+<span class="lineno">  188 </span><span class="spaces">                              </span><span class="istickedoff">put $ ContainerStack</span>
+<span class="lineno">  189 </span><span class="spaces">                                   </span><span class="istickedoff">(if <span class="tickonlyfalse">Seq.null zs</span></span>
+<span class="lineno">  190 </span><span class="spaces">                                       </span><span class="istickedoff">then <span class="nottickedoff">Container ct' (cs' |&gt; C (Container li zs))</span></span>
+<span class="lineno">  191 </span><span class="spaces">                                       </span><span class="istickedoff">else Container ct' (cs' |&gt;</span>
+<span class="lineno">  192 </span><span class="spaces">                                               </span><span class="istickedoff">C (Container li zs) |&gt; b)) rs</span>
+<span class="lineno">  193 </span><span class="spaces">                            </span><span class="istickedoff">_ -&gt; put $ ContainerStack (Container ct' (cs' |&gt; C top)) rs</span>
+<span class="lineno">  194 </span><span class="spaces">              </span><span class="istickedoff">[] -&gt; <span class="nottickedoff">return ()</span></span>
+<span class="lineno">  195 </span><span class="spaces">       </span><span class="istickedoff">_ -&gt; case rest of</span>
+<span class="lineno">  196 </span><span class="spaces">             </span><span class="istickedoff">(Container ct' cs' : rs) -&gt;</span>
+<span class="lineno">  197 </span><span class="spaces">                 </span><span class="istickedoff">put $ ContainerStack (Container ct' (cs' |&gt; C top)) rs</span>
+<span class="lineno">  198 </span><span class="spaces">             </span><span class="istickedoff">[] -&gt; <span class="nottickedoff">return ()</span></span></span>
+<span class="lineno">  199 </span>
+<span class="lineno">  200 </span>-- Add a leaf to the top container.
+<span class="lineno">  201 </span>addLeaf :: LineNumber -&gt; Leaf -&gt; ContainerM ()
+<span class="lineno">  202 </span><span class="decl"><span class="istickedoff">addLeaf lineNum lf = do</span>
+<span class="lineno">  203 </span><span class="spaces">  </span><span class="istickedoff">ContainerStack top rest &lt;- get</span>
+<span class="lineno">  204 </span><span class="spaces">  </span><span class="istickedoff">case (top, lf) of</span>
+<span class="lineno">  205 </span><span class="spaces">        </span><span class="istickedoff">(Container ct@(ListItem{}) cs, BlankLine{}) -&gt;</span>
+<span class="lineno">  206 </span><span class="spaces">          </span><span class="istickedoff">case viewr cs of</span>
+<span class="lineno">  207 </span><span class="spaces">            </span><span class="istickedoff">(_ :&gt; L _ BlankLine{}) -&gt; -- two blanks break out of list item:</span>
+<span class="lineno">  208 </span><span class="spaces">                 </span><span class="istickedoff">closeContainer &gt;&gt; addLeaf <span class="nottickedoff">lineNum</span> lf</span>
+<span class="lineno">  209 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt; put $ ContainerStack (Container ct (cs |&gt; L <span class="nottickedoff">lineNum</span> lf)) rest</span>
+<span class="lineno">  210 </span><span class="spaces">        </span><span class="istickedoff">(Container ct cs, _) -&gt;</span>
+<span class="lineno">  211 </span><span class="spaces">                 </span><span class="istickedoff">put $ ContainerStack (Container ct (cs |&gt; L <span class="nottickedoff">lineNum</span> lf)) rest</span></span>
+<span class="lineno">  212 </span>
+<span class="lineno">  213 </span>-- Add a container to the container stack.
+<span class="lineno">  214 </span>addContainer :: ContainerType -&gt; ContainerM ()
+<span class="lineno">  215 </span><span class="decl"><span class="istickedoff">addContainer ct = modify $ \(ContainerStack top rest) -&gt;</span>
+<span class="lineno">  216 </span><span class="spaces">  </span><span class="istickedoff">ContainerStack (Container ct mempty) (top:rest)</span></span>
+<span class="lineno">  217 </span>
+<span class="lineno">  218 </span>-- Step 2
+<span class="lineno">  219 </span>
+<span class="lineno">  220 </span>-- Convert Document container and reference map into an AST.
+<span class="lineno">  221 </span>processDocument :: (Container, ReferenceMap) -&gt; Blocks
+<span class="lineno">  222 </span><span class="decl"><span class="istickedoff">processDocument (Container ct cs, refmap) =</span>
+<span class="lineno">  223 </span><span class="spaces">  </span><span class="istickedoff">case ct of</span>
+<span class="lineno">  224 </span><span class="spaces">    </span><span class="istickedoff">Document -&gt; processElts <span class="nottickedoff">refmap</span> (toList cs)</span>
+<span class="lineno">  225 </span><span class="spaces">    </span><span class="istickedoff">_        -&gt; <span class="nottickedoff">error &quot;top level container is not Document&quot;</span></span></span>
+<span class="lineno">  226 </span>
+<span class="lineno">  227 </span>-- Turn the result of `processLines` into a proper AST.
+<span class="lineno">  228 </span>-- This requires grouping text lines into paragraphs
+<span class="lineno">  229 </span>-- and list items into lists, handling blank lines,
+<span class="lineno">  230 </span>-- parsing inline contents of texts and resolving referencess.
+<span class="lineno">  231 </span>processElts :: ReferenceMap -&gt; [Elt] -&gt; Blocks
+<span class="lineno">  232 </span><span class="decl"><span class="istickedoff">processElts _ [] = mempty</span>
+<span class="lineno">  233 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  234 </span><span class="spaces"></span><span class="istickedoff">processElts refmap (L _lineNumber lf : rest) =</span>
+<span class="lineno">  235 </span><span class="spaces">  </span><span class="istickedoff">case lf of</span>
+<span class="lineno">  236 </span><span class="spaces">    </span><span class="istickedoff">-- Special handling of @docs lines in Elm:</span>
+<span class="lineno">  237 </span><span class="spaces">    </span><span class="istickedoff">TextLine t | Just terms1 &lt;- T.stripPrefix &quot;@docs&quot; t -&gt;</span>
+<span class="lineno">  238 </span><span class="spaces">        </span><span class="istickedoff">let</span>
+<span class="lineno">  239 </span><span class="spaces">            </span><span class="istickedoff">docs = terms1 : map (cleanDoc . extractText) docLines</span>
+<span class="lineno">  240 </span><span class="spaces">        </span><span class="istickedoff">in</span>
+<span class="lineno">  241 </span><span class="spaces">            </span><span class="istickedoff">singleton (ElmDocs $ filter ((/=) []) $ fmap (filter ((/=) &quot;&quot;). fmap T.strip . T.splitOn &quot;,&quot;) docs) &lt;&gt;</span>
+<span class="lineno">  242 </span><span class="spaces">            </span><span class="istickedoff">processElts <span class="nottickedoff">refmap</span> rest'</span>
+<span class="lineno">  243 </span><span class="spaces">        </span><span class="istickedoff">where</span>
+<span class="lineno">  244 </span><span class="spaces">            </span><span class="istickedoff">(docLines, rest') = span isDocLine rest</span>
+<span class="lineno">  245 </span><span class="spaces">            </span><span class="istickedoff">isDocLine (L _ (TextLine _)) = True</span>
+<span class="lineno">  246 </span><span class="spaces">            </span><span class="istickedoff">isDocLine _ = False</span>
+<span class="lineno">  247 </span><span class="spaces">            </span><span class="istickedoff">cleanDoc lin =</span>
+<span class="lineno">  248 </span><span class="spaces">                </span><span class="istickedoff">case T.stripPrefix &quot;@docs&quot; lin of</span>
+<span class="lineno">  249 </span><span class="spaces">                    </span><span class="istickedoff">Nothing -&gt; lin</span>
+<span class="lineno">  250 </span><span class="spaces">                    </span><span class="istickedoff">Just stripped -&gt; stripped</span>
+<span class="lineno">  251 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  252 </span><span class="spaces">    </span><span class="istickedoff">-- Gobble text lines and make them into a Para:</span>
+<span class="lineno">  253 </span><span class="spaces">    </span><span class="istickedoff">TextLine t -&gt; singleton (Para $ parseInlines <span class="nottickedoff">refmap</span> txt) &lt;&gt;</span>
+<span class="lineno">  254 </span><span class="spaces">                  </span><span class="istickedoff">processElts <span class="nottickedoff">refmap</span> rest'</span>
+<span class="lineno">  255 </span><span class="spaces">               </span><span class="istickedoff">where txt = T.stripEnd $ joinLines $ map T.stripStart</span>
+<span class="lineno">  256 </span><span class="spaces">                           </span><span class="istickedoff">$ t : map extractText textlines</span>
+<span class="lineno">  257 </span><span class="spaces">                     </span><span class="istickedoff">(textlines, rest') = span isTextLine rest</span>
+<span class="lineno">  258 </span><span class="spaces">                     </span><span class="istickedoff">isTextLine (L _ (TextLine s)) | T.isPrefixOf &quot;@docs&quot; s = False</span>
+<span class="lineno">  259 </span><span class="spaces">                     </span><span class="istickedoff">isTextLine (L _ (TextLine _)) = True</span>
+<span class="lineno">  260 </span><span class="spaces">                     </span><span class="istickedoff">isTextLine _ = False</span>
+<span class="lineno">  261 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  262 </span><span class="spaces">    </span><span class="istickedoff">-- Blanks at outer level are ignored:</span>
+<span class="lineno">  263 </span><span class="spaces">    </span><span class="istickedoff">BlankLine{} -&gt; processElts <span class="nottickedoff">refmap</span> rest</span>
+<span class="lineno">  264 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  265 </span><span class="spaces">    </span><span class="istickedoff">-- Headers:</span>
+<span class="lineno">  266 </span><span class="spaces">    </span><span class="istickedoff">ATXHeader lvl t -&gt; singleton (Header lvl $ parseInlines <span class="nottickedoff">refmap</span> t) &lt;&gt;</span>
+<span class="lineno">  267 </span><span class="spaces">                       </span><span class="istickedoff">processElts <span class="nottickedoff">refmap</span> rest</span>
+<span class="lineno">  268 </span><span class="spaces">    </span><span class="istickedoff">SetextHeader lvl t -&gt; <span class="nottickedoff">singleton (Header lvl $ parseInlines refmap t) &lt;&gt;</span></span>
+<span class="lineno">  269 </span><span class="spaces">                          </span><span class="istickedoff"><span class="nottickedoff">processElts refmap rest</span></span>
+<span class="lineno">  270 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  271 </span><span class="spaces">    </span><span class="istickedoff">-- Horizontal rule:</span>
+<span class="lineno">  272 </span><span class="spaces">    </span><span class="istickedoff">Rule -&gt; singleton HRule &lt;&gt; processElts <span class="nottickedoff">refmap</span> rest</span>
+<span class="lineno">  273 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  274 </span><span class="spaces"></span><span class="istickedoff">processElts refmap (C (Container ct cs) : rest) =</span>
+<span class="lineno">  275 </span><span class="spaces">  </span><span class="istickedoff">case ct of</span>
+<span class="lineno">  276 </span><span class="spaces">    </span><span class="istickedoff">Document -&gt; <span class="nottickedoff">error &quot;Document container found inside Document&quot;</span></span>
+<span class="lineno">  277 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  278 </span><span class="spaces">    </span><span class="istickedoff">BlockQuote -&gt; singleton (Blockquote $ processElts <span class="nottickedoff">refmap</span> (toList cs)) &lt;&gt;</span>
+<span class="lineno">  279 </span><span class="spaces">                  </span><span class="istickedoff">processElts <span class="nottickedoff">refmap</span> rest</span>
+<span class="lineno">  280 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  281 </span><span class="spaces">    </span><span class="istickedoff">-- List item?  Gobble up following list items of the same type</span>
+<span class="lineno">  282 </span><span class="spaces">    </span><span class="istickedoff">-- (skipping blank lines), determine whether the list is tight or</span>
+<span class="lineno">  283 </span><span class="spaces">    </span><span class="istickedoff">-- loose, and generate a List.</span>
+<span class="lineno">  284 </span><span class="spaces">    </span><span class="istickedoff">ListItem { listType = listType' } -&gt;</span>
+<span class="lineno">  285 </span><span class="spaces">        </span><span class="istickedoff">singleton (List isTight listType' items') &lt;&gt; processElts <span class="nottickedoff">refmap</span> rest'</span>
+<span class="lineno">  286 </span><span class="spaces">              </span><span class="istickedoff">where xs = takeListItems rest</span>
+<span class="lineno">  287 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  288 </span><span class="spaces">                    </span><span class="istickedoff">rest' = drop (length xs) rest</span>
+<span class="lineno">  289 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  290 </span><span class="spaces">                    </span><span class="istickedoff">-- take list items as long as list type matches and we</span>
+<span class="lineno">  291 </span><span class="spaces">                    </span><span class="istickedoff">-- don't hit two blank lines:</span>
+<span class="lineno">  292 </span><span class="spaces">                    </span><span class="istickedoff">takeListItems</span>
+<span class="lineno">  293 </span><span class="spaces">                      </span><span class="istickedoff">(C c@(Container ListItem { listType = lt' } _) : zs)</span>
+<span class="lineno">  294 </span><span class="spaces">                      </span><span class="istickedoff">| <span class="tickonlytrue">listTypesMatch lt' listType'</span> = C c : takeListItems zs</span>
+<span class="lineno">  295 </span><span class="spaces">                    </span><span class="istickedoff">takeListItems (lf@(L _ (BlankLine _)) :</span>
+<span class="lineno">  296 </span><span class="spaces">                      </span><span class="istickedoff">c@(C (Container ListItem { listType = lt' } _)) : zs)</span>
+<span class="lineno">  297 </span><span class="spaces">                      </span><span class="istickedoff">| listTypesMatch lt' listType' = lf : c : takeListItems zs</span>
+<span class="lineno">  298 </span><span class="spaces">                    </span><span class="istickedoff">takeListItems _ = []</span>
+<span class="lineno">  299 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  300 </span><span class="spaces">                    </span><span class="istickedoff">listTypesMatch (Bullet c1) (Bullet c2) = c1 == c2</span>
+<span class="lineno">  301 </span><span class="spaces">                    </span><span class="istickedoff">listTypesMatch (Numbered w1 _) (Numbered w2 _) = w1 == w2</span>
+<span class="lineno">  302 </span><span class="spaces">                    </span><span class="istickedoff">listTypesMatch _ _ = False</span>
+<span class="lineno">  303 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  304 </span><span class="spaces">                    </span><span class="istickedoff">items = mapMaybe getItem (Container ct cs : [c | C c &lt;- xs])</span>
+<span class="lineno">  305 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  306 </span><span class="spaces">                    </span><span class="istickedoff">getItem (Container ListItem{} cs') = Just $ toList cs'</span>
+<span class="lineno">  307 </span><span class="spaces">                    </span><span class="istickedoff">getItem _                          = <span class="nottickedoff">Nothing</span></span>
+<span class="lineno">  308 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  309 </span><span class="spaces">                    </span><span class="istickedoff">items' = map (processElts <span class="nottickedoff">refmap</span>) items</span>
+<span class="lineno">  310 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  311 </span><span class="spaces">                    </span><span class="istickedoff">isTight = tightListItem xs &amp;&amp; all tightListItem items</span>
+<span class="lineno">  312 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  313 </span><span class="spaces">    </span><span class="istickedoff">FencedCode _ _ info' -&gt; singleton (CodeBlock attr txt) &lt;&gt;</span>
+<span class="lineno">  314 </span><span class="spaces">                               </span><span class="istickedoff">processElts <span class="nottickedoff">refmap</span> rest</span>
+<span class="lineno">  315 </span><span class="spaces">                  </span><span class="istickedoff">where txt = joinLines $ map extractText $ toList cs</span>
+<span class="lineno">  316 </span><span class="spaces">                        </span><span class="istickedoff">attr = CodeAttr x <span class="nottickedoff">(T.strip y)</span></span>
+<span class="lineno">  317 </span><span class="spaces">                        </span><span class="istickedoff">(x,y) = T.break (==' ') info'</span>
+<span class="lineno">  318 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  319 </span><span class="spaces">    </span><span class="istickedoff">IndentedCode -&gt; singleton (CodeBlock (CodeAttr &quot;&quot; <span class="nottickedoff">&quot;&quot;</span>) txt)</span>
+<span class="lineno">  320 </span><span class="spaces">                    </span><span class="istickedoff">&lt;&gt; processElts <span class="nottickedoff">refmap</span> rest'</span>
+<span class="lineno">  321 </span><span class="spaces">                  </span><span class="istickedoff">where txt = joinLines $ stripTrailingEmpties</span>
+<span class="lineno">  322 </span><span class="spaces">                              </span><span class="istickedoff">$ concatMap extractCode cbs</span>
+<span class="lineno">  323 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  324 </span><span class="spaces">                        </span><span class="istickedoff">stripTrailingEmpties = reverse .</span>
+<span class="lineno">  325 </span><span class="spaces">                          </span><span class="istickedoff">dropWhile (T.all (==' ')) . reverse</span>
+<span class="lineno">  326 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  327 </span><span class="spaces">                        </span><span class="istickedoff">-- explanation for next line:  when we parsed</span>
+<span class="lineno">  328 </span><span class="spaces">                        </span><span class="istickedoff">-- the blank line, we dropped 0-3 spaces.</span>
+<span class="lineno">  329 </span><span class="spaces">                        </span><span class="istickedoff">-- but for this, code block context, we want</span>
+<span class="lineno">  330 </span><span class="spaces">                        </span><span class="istickedoff">-- to have dropped 4 spaces. we simply drop</span>
+<span class="lineno">  331 </span><span class="spaces">                        </span><span class="istickedoff">-- one more:</span>
+<span class="lineno">  332 </span><span class="spaces">                        </span><span class="istickedoff">extractCode (L _ (BlankLine t)) = [T.drop 1 t]</span>
+<span class="lineno">  333 </span><span class="spaces">                        </span><span class="istickedoff">extractCode (C (Container IndentedCode cs')) =</span>
+<span class="lineno">  334 </span><span class="spaces">                          </span><span class="istickedoff">map extractText $ toList cs'</span>
+<span class="lineno">  335 </span><span class="spaces">                        </span><span class="istickedoff">extractCode _ = <span class="nottickedoff">[]</span></span>
+<span class="lineno">  336 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  337 </span><span class="spaces">                        </span><span class="istickedoff">(cbs, rest') = span isIndentedCodeOrBlank</span>
+<span class="lineno">  338 </span><span class="spaces">                                       </span><span class="istickedoff">(C (Container ct cs) : rest)</span>
+<span class="lineno">  339 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  340 </span><span class="spaces">                        </span><span class="istickedoff">isIndentedCodeOrBlank (L _ BlankLine{}) = True</span>
+<span class="lineno">  341 </span><span class="spaces">                        </span><span class="istickedoff">isIndentedCodeOrBlank (C (Container IndentedCode _))</span>
+<span class="lineno">  342 </span><span class="spaces">                                                              </span><span class="istickedoff">= True</span>
+<span class="lineno">  343 </span><span class="spaces">                        </span><span class="istickedoff">isIndentedCodeOrBlank _               = False</span>
+<span class="lineno">  344 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  345 </span><span class="spaces">    </span><span class="istickedoff">RawHtmlBlock -&gt; singleton (HtmlBlock txt) &lt;&gt; processElts <span class="nottickedoff">refmap</span> rest</span>
+<span class="lineno">  346 </span><span class="spaces">                  </span><span class="istickedoff">where txt = joinLines (map extractText (toList cs))</span>
+<span class="lineno">  347 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  348 </span><span class="spaces">    </span><span class="istickedoff">-- References have already been taken into account in the reference map,</span>
+<span class="lineno">  349 </span><span class="spaces">    </span><span class="istickedoff">-- so we just skip.</span>
+<span class="lineno">  350 </span><span class="spaces">    </span><span class="istickedoff">Reference{} -&gt;</span>
+<span class="lineno">  351 </span><span class="spaces">        </span><span class="istickedoff">processElts' [] (C (Container ct cs) : rest)</span>
+<span class="lineno">  352 </span><span class="spaces">        </span><span class="istickedoff">where</span>
+<span class="lineno">  353 </span><span class="spaces">            </span><span class="istickedoff">refs cs' =</span>
+<span class="lineno">  354 </span><span class="spaces">                </span><span class="istickedoff">fmap (extractRef . extractText) (toList cs')</span>
+<span class="lineno">  355 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  356 </span><span class="spaces">            </span><span class="istickedoff">extractRef t =</span>
+<span class="lineno">  357 </span><span class="spaces">              </span><span class="istickedoff">case parse pReference (T.strip t) of</span>
+<span class="lineno">  358 </span><span class="spaces">                 </span><span class="istickedoff">Right (lab, lnk, tit) -&gt;</span>
+<span class="lineno">  359 </span><span class="spaces">                    </span><span class="istickedoff">(lab, lnk, tit)</span>
+<span class="lineno">  360 </span><span class="spaces">                 </span><span class="istickedoff">Left _ -&gt;</span>
+<span class="lineno">  361 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">(&quot;??&quot;, &quot;??&quot;, &quot;??&quot;)</span></span>
+<span class="lineno">  362 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  363 </span><span class="spaces">            </span><span class="istickedoff">processElts' :: [[(Text, Text, Text)]] -&gt; [Elt] -&gt; Blocks</span>
+<span class="lineno">  364 </span><span class="spaces">            </span><span class="istickedoff">processElts' acc (C (Container Reference cs) : rest') =</span>
+<span class="lineno">  365 </span><span class="spaces">                </span><span class="istickedoff">processElts' (refs cs : acc) rest'</span>
+<span class="lineno">  366 </span><span class="spaces">            </span><span class="istickedoff">processElts' acc pass =</span>
+<span class="lineno">  367 </span><span class="spaces">                </span><span class="istickedoff">(singleton $ ReferencesBlock $ concat $ reverse acc)</span>
+<span class="lineno">  368 </span><span class="spaces">                    </span><span class="istickedoff">&lt;&gt; processElts <span class="nottickedoff">refmap</span> pass</span>
+<span class="lineno">  369 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  370 </span><span class="spaces">   </span><span class="istickedoff">where isBlankLine (L _ BlankLine{}) = True</span>
+<span class="lineno">  371 </span><span class="spaces">         </span><span class="istickedoff">isBlankLine _ = False</span>
+<span class="lineno">  372 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  373 </span><span class="spaces">         </span><span class="istickedoff">tightListItem [] = True</span>
+<span class="lineno">  374 </span><span class="spaces">         </span><span class="istickedoff">tightListItem xs = not $ any isBlankLine xs</span></span>
+<span class="lineno">  375 </span>
+<span class="lineno">  376 </span>extractText :: Elt -&gt; Text
+<span class="lineno">  377 </span><span class="decl"><span class="istickedoff">extractText (L _ (TextLine t)) = t</span>
+<span class="lineno">  378 </span><span class="spaces"></span><span class="istickedoff">extractText _ = <span class="nottickedoff">mempty</span></span></span>
+<span class="lineno">  379 </span>
+<span class="lineno">  380 </span>-- Step 1
+<span class="lineno">  381 </span>
+<span class="lineno">  382 </span>processLines :: Text -&gt; (Container, ReferenceMap)
+<span class="lineno">  383 </span><span class="decl"><span class="istickedoff">processLines t = (doc, <span class="nottickedoff">refmap</span>)</span>
+<span class="lineno">  384 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  385 </span><span class="spaces">  </span><span class="istickedoff">(doc, refmap) = evalRWS (mapM_ processLine lns &gt;&gt; closeStack) <span class="nottickedoff">()</span> startState</span>
+<span class="lineno">  386 </span><span class="spaces">  </span><span class="istickedoff">lns        = zip [1..] (map tabFilter $ T.lines t)</span>
+<span class="lineno">  387 </span><span class="spaces">  </span><span class="istickedoff">startState = ContainerStack (Container Document mempty) []</span></span>
+<span class="lineno">  388 </span>
+<span class="lineno">  389 </span>-- The main block-parsing function.
+<span class="lineno">  390 </span>-- We analyze a line of text and modify the container stack accordingly,
+<span class="lineno">  391 </span>-- adding a new leaf, or closing or opening containers.
+<span class="lineno">  392 </span>processLine :: (LineNumber, Text) -&gt; ContainerM ()
+<span class="lineno">  393 </span><span class="decl"><span class="istickedoff">processLine (lineNumber, txt) = do</span>
+<span class="lineno">  394 </span><span class="spaces">  </span><span class="istickedoff">ContainerStack top@(Container ct cs) rest &lt;- get</span>
+<span class="lineno">  395 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  396 </span><span class="spaces">  </span><span class="istickedoff">-- Apply the line-start scanners appropriate for each nested container.</span>
+<span class="lineno">  397 </span><span class="spaces">  </span><span class="istickedoff">-- Return the remainder of the string, and the number of unmatched</span>
+<span class="lineno">  398 </span><span class="spaces">  </span><span class="istickedoff">-- containers.</span>
+<span class="lineno">  399 </span><span class="spaces">  </span><span class="istickedoff">let (t', numUnmatched) = tryOpenContainers (reverse $ top:rest) txt</span>
+<span class="lineno">  400 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  401 </span><span class="spaces">  </span><span class="istickedoff">-- Some new containers can be started only after a blank.</span>
+<span class="lineno">  402 </span><span class="spaces">  </span><span class="istickedoff">let lastLineIsText = numUnmatched == 0 &amp;&amp;</span>
+<span class="lineno">  403 </span><span class="spaces">                       </span><span class="istickedoff">case viewr cs of</span>
+<span class="lineno">  404 </span><span class="spaces">                            </span><span class="istickedoff">(_ :&gt; L _ (TextLine _)) -&gt; True</span>
+<span class="lineno">  405 </span><span class="spaces">                            </span><span class="istickedoff">_                       -&gt; False</span>
+<span class="lineno">  406 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  407 </span><span class="spaces">  </span><span class="istickedoff">-- Process the rest of the line in a way that makes sense given</span>
+<span class="lineno">  408 </span><span class="spaces">  </span><span class="istickedoff">-- the container type at the top of the stack (ct):</span>
+<span class="lineno">  409 </span><span class="spaces">  </span><span class="istickedoff">case ct of</span>
+<span class="lineno">  410 </span><span class="spaces">    </span><span class="istickedoff">-- If it's a verbatim line container, add the line.</span>
+<span class="lineno">  411 </span><span class="spaces">    </span><span class="istickedoff">RawHtmlBlock{} | <span class="tickonlyfalse">numUnmatched == 0</span> -&gt; <span class="nottickedoff">addLeaf lineNumber (TextLine t')</span></span>
+<span class="lineno">  412 </span><span class="spaces">    </span><span class="istickedoff">IndentedCode   | numUnmatched == 0 -&gt; addLeaf <span class="nottickedoff">lineNumber</span> (TextLine t')</span>
+<span class="lineno">  413 </span><span class="spaces">    </span><span class="istickedoff">FencedCode{ fence = fence' } -&gt;</span>
+<span class="lineno">  414 </span><span class="spaces">    </span><span class="istickedoff">-- here we don't check numUnmatched because we allow laziness</span>
+<span class="lineno">  415 </span><span class="spaces">      </span><span class="istickedoff">if fence' `T.isPrefixOf` t'</span>
+<span class="lineno">  416 </span><span class="spaces">         </span><span class="istickedoff">-- closing code fence</span>
+<span class="lineno">  417 </span><span class="spaces">         </span><span class="istickedoff">then closeContainer</span>
+<span class="lineno">  418 </span><span class="spaces">         </span><span class="istickedoff">else addLeaf <span class="nottickedoff">lineNumber</span> (TextLine t')</span>
+<span class="lineno">  419 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  420 </span><span class="spaces">    </span><span class="istickedoff">Reference -&gt;</span>
+<span class="lineno">  421 </span><span class="spaces">      </span><span class="istickedoff">case tryNewContainers lastLineIsText (T.length txt - T.length t') t' of</span>
+<span class="lineno">  422 </span><span class="spaces">        </span><span class="istickedoff">(ns, lf) -&gt; do</span>
+<span class="lineno">  423 </span><span class="spaces">          </span><span class="istickedoff">closeContainer</span>
+<span class="lineno">  424 </span><span class="spaces">          </span><span class="istickedoff">addNew (ns, lf)</span>
+<span class="lineno">  425 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  426 </span><span class="spaces">    </span><span class="istickedoff">-- otherwise, parse the remainder to see if we have new container starts:</span>
+<span class="lineno">  427 </span><span class="spaces">    </span><span class="istickedoff">_ -&gt; case tryNewContainers lastLineIsText (T.length txt - T.length t') t' of</span>
+<span class="lineno">  428 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  429 </span><span class="spaces">       </span><span class="istickedoff">-- lazy continuation: text line, last line was text, no new containers,</span>
+<span class="lineno">  430 </span><span class="spaces">       </span><span class="istickedoff">-- some unmatched containers:</span>
+<span class="lineno">  431 </span><span class="spaces">       </span><span class="istickedoff">([], TextLine t)</span>
+<span class="lineno">  432 </span><span class="spaces">           </span><span class="istickedoff">| numUnmatched &gt; 0</span>
+<span class="lineno">  433 </span><span class="spaces">           </span><span class="istickedoff">, <span class="tickonlyfalse">case viewr cs of</span></span>
+<span class="lineno">  434 </span><span class="spaces">                  </span><span class="istickedoff"><span class="tickonlyfalse">(_ :&gt; L _ (TextLine _)) -&gt; <span class="nottickedoff">True</span></span></span>
+<span class="lineno">  435 </span><span class="spaces">                  </span><span class="istickedoff"><span class="tickonlyfalse">_                       -&gt; False</span></span>
+<span class="lineno">  436 </span><span class="spaces">           </span><span class="istickedoff">, <span class="nottickedoff">ct /= IndentedCode</span> -&gt; <span class="nottickedoff">addLeaf lineNumber (TextLine t)</span></span>
+<span class="lineno">  437 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  438 </span><span class="spaces">       </span><span class="istickedoff">-- if it's a setext header line and the top container has a textline</span>
+<span class="lineno">  439 </span><span class="spaces">       </span><span class="istickedoff">-- as last child, add a setext header:</span>
+<span class="lineno">  440 </span><span class="spaces">       </span><span class="istickedoff">([], SetextHeader lev _) | <span class="nottickedoff">numUnmatched == 0</span> -&gt;</span>
+<span class="lineno">  441 </span><span class="spaces">           </span><span class="istickedoff"><span class="nottickedoff">case viewr cs of</span></span>
+<span class="lineno">  442 </span><span class="spaces">             </span><span class="istickedoff"><span class="nottickedoff">(cs' :&gt; L _ (TextLine t)) -&gt; -- replace last text line with setext header</span></span>
+<span class="lineno">  443 </span><span class="spaces">               </span><span class="istickedoff"><span class="nottickedoff">put $ ContainerStack (Container ct</span></span>
+<span class="lineno">  444 </span><span class="spaces">                        </span><span class="istickedoff"><span class="nottickedoff">(cs' |&gt; L lineNumber (SetextHeader lev t))) rest</span></span>
+<span class="lineno">  445 </span><span class="spaces">               </span><span class="istickedoff"><span class="nottickedoff">-- Note: the following case should not occur, since</span></span>
+<span class="lineno">  446 </span><span class="spaces">               </span><span class="istickedoff"><span class="nottickedoff">-- we don't add a SetextHeader leaf unless lastLineIsText.</span></span>
+<span class="lineno">  447 </span><span class="spaces">             </span><span class="istickedoff"><span class="nottickedoff">_ -&gt; error &quot;setext header line without preceding text line&quot;</span></span>
+<span class="lineno">  448 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  449 </span><span class="spaces">       </span><span class="istickedoff">-- otherwise, close all the unmatched containers, add the new</span>
+<span class="lineno">  450 </span><span class="spaces">       </span><span class="istickedoff">-- containers, and finally add the new leaf:</span>
+<span class="lineno">  451 </span><span class="spaces">       </span><span class="istickedoff">(ns, lf) -&gt; do -- close unmatched containers, add new ones</span>
+<span class="lineno">  452 </span><span class="spaces">           </span><span class="istickedoff">_ &lt;- replicateM numUnmatched closeContainer</span>
+<span class="lineno">  453 </span><span class="spaces">           </span><span class="istickedoff">addNew (ns, lf)</span>
+<span class="lineno">  454 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  455 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  456 </span><span class="spaces">    </span><span class="istickedoff">addNew (ns, lf) = do</span>
+<span class="lineno">  457 </span><span class="spaces">      </span><span class="istickedoff">mapM_ addContainer ns</span>
+<span class="lineno">  458 </span><span class="spaces">      </span><span class="istickedoff">case (reverse ns, lf) of</span>
+<span class="lineno">  459 </span><span class="spaces">        </span><span class="istickedoff">-- don't add extra blank at beginning of fenced code block</span>
+<span class="lineno">  460 </span><span class="spaces">        </span><span class="istickedoff">(FencedCode{}:_,  BlankLine{}) -&gt; return <span class="nottickedoff">()</span></span>
+<span class="lineno">  461 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt; addLeaf <span class="nottickedoff">lineNumber</span> lf</span></span>
+<span class="lineno">  462 </span>
+<span class="lineno">  463 </span>-- Try to match the scanners corresponding to any currently open containers.
+<span class="lineno">  464 </span>-- Return remaining text after matching scanners, plus the number of open
+<span class="lineno">  465 </span>-- containers whose scanners did not match.  (These will be closed unless
+<span class="lineno">  466 </span>-- we have a lazy text line.)
+<span class="lineno">  467 </span>tryOpenContainers :: [Container] -&gt; Text -&gt; (Text, Int)
+<span class="lineno">  468 </span><span class="decl"><span class="istickedoff">tryOpenContainers cs t = case parse (scanners $ map containerContinue cs) t of</span>
+<span class="lineno">  469 </span><span class="spaces">                         </span><span class="istickedoff">Right (t', n)  -&gt; (t', n)</span>
+<span class="lineno">  470 </span><span class="spaces">                         </span><span class="istickedoff">Left e         -&gt; <span class="nottickedoff">error $ &quot;error parsing scanners: &quot; ++</span></span>
+<span class="lineno">  471 </span><span class="spaces">                                            </span><span class="istickedoff"><span class="nottickedoff">show e</span></span>
+<span class="lineno">  472 </span><span class="spaces">  </span><span class="istickedoff">where scanners [] = (,) &lt;$&gt; takeText &lt;*&gt; pure 0</span>
+<span class="lineno">  473 </span><span class="spaces">        </span><span class="istickedoff">scanners (p:ps) = (p *&gt; scanners ps)</span>
+<span class="lineno">  474 </span><span class="spaces">                      </span><span class="istickedoff">&lt;|&gt; ((,) &lt;$&gt; takeText &lt;*&gt; pure (length (<span class="nottickedoff">p</span>:ps)))</span></span>
+<span class="lineno">  475 </span>
+<span class="lineno">  476 </span>-- Try to match parsers for new containers.  Return list of new
+<span class="lineno">  477 </span>-- container types, and the leaf to add inside the new containers.
+<span class="lineno">  478 </span>tryNewContainers :: Bool -&gt; Int -&gt; Text -&gt; ([ContainerType], Leaf)
+<span class="lineno">  479 </span><span class="decl"><span class="istickedoff">tryNewContainers lastLineIsText offset t =</span>
+<span class="lineno">  480 </span><span class="spaces">  </span><span class="istickedoff">case parse newContainers t of</span>
+<span class="lineno">  481 </span><span class="spaces">       </span><span class="istickedoff">Right (cs,t') -&gt; (cs, t')</span>
+<span class="lineno">  482 </span><span class="spaces">       </span><span class="istickedoff">Left err      -&gt; <span class="nottickedoff">error (show err)</span></span>
+<span class="lineno">  483 </span><span class="spaces">  </span><span class="istickedoff">where newContainers = do</span>
+<span class="lineno">  484 </span><span class="spaces">          </span><span class="istickedoff">getPosition &gt;&gt;= \pos -&gt; setPosition pos{ column = offset + 1 }</span>
+<span class="lineno">  485 </span><span class="spaces">          </span><span class="istickedoff">regContainers &lt;- many (containerStart <span class="nottickedoff">lastLineIsText</span>)</span>
+<span class="lineno">  486 </span><span class="spaces">          </span><span class="istickedoff">verbatimContainers &lt;- option []</span>
+<span class="lineno">  487 </span><span class="spaces">                            </span><span class="istickedoff">$ count 1 (verbatimContainerStart lastLineIsText)</span>
+<span class="lineno">  488 </span><span class="spaces">          </span><span class="istickedoff">if null verbatimContainers</span>
+<span class="lineno">  489 </span><span class="spaces">             </span><span class="istickedoff">then (,) &lt;$&gt; pure regContainers &lt;*&gt; leaf lastLineIsText</span>
+<span class="lineno">  490 </span><span class="spaces">             </span><span class="istickedoff">else (,) &lt;$&gt; pure (regContainers ++ verbatimContainers) &lt;*&gt;</span>
+<span class="lineno">  491 </span><span class="spaces">                            </span><span class="istickedoff">textLineOrBlank</span></span>
+<span class="lineno">  492 </span>
+<span class="lineno">  493 </span>textLineOrBlank :: Parser Leaf
+<span class="lineno">  494 </span><span class="decl"><span class="istickedoff">textLineOrBlank = consolidate &lt;$&gt; takeText</span>
+<span class="lineno">  495 </span><span class="spaces">  </span><span class="istickedoff">where consolidate ts | T.all isWhitespace ts = BlankLine ts</span>
+<span class="lineno">  496 </span><span class="spaces">                       </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span>        = TextLine  ts</span></span>
+<span class="lineno">  497 </span>
+<span class="lineno">  498 </span>-- Parse a leaf node.
+<span class="lineno">  499 </span>leaf :: Bool -&gt; Parser Leaf
+<span class="lineno">  500 </span><span class="decl"><span class="istickedoff">leaf lastLineIsText = scanNonindentSpace *&gt; (</span>
+<span class="lineno">  501 </span><span class="spaces">     </span><span class="istickedoff">(ATXHeader &lt;$&gt; parseAtxHeaderStart &lt;*&gt;</span>
+<span class="lineno">  502 </span><span class="spaces">         </span><span class="istickedoff">(T.strip . removeATXSuffix &lt;$&gt; takeText))</span>
+<span class="lineno">  503 </span><span class="spaces">   </span><span class="istickedoff">&lt;|&gt; (guard lastLineIsText *&gt; (<span class="nottickedoff">SetextHeader</span> &lt;$&gt; parseSetextHeaderLine &lt;*&gt; <span class="nottickedoff">pure mempty</span>))</span>
+<span class="lineno">  504 </span><span class="spaces">   </span><span class="istickedoff">&lt;|&gt; (Rule &lt;$ scanHRuleLine)</span>
+<span class="lineno">  505 </span><span class="spaces">   </span><span class="istickedoff">&lt;|&gt; textLineOrBlank</span>
+<span class="lineno">  506 </span><span class="spaces">  </span><span class="istickedoff">)</span>
+<span class="lineno">  507 </span><span class="spaces">  </span><span class="istickedoff">where removeATXSuffix t = case T.dropWhileEnd (`elem` (&quot; #&quot; :: String)) t of</span>
+<span class="lineno">  508 </span><span class="spaces">                                 </span><span class="istickedoff">t' | <span class="tickonlyfalse">T.null t'</span> -&gt; <span class="nottickedoff">t'</span></span>
+<span class="lineno">  509 </span><span class="spaces">                                      </span><span class="istickedoff">-- an escaped \#</span>
+<span class="lineno">  510 </span><span class="spaces">                                    </span><span class="istickedoff">| <span class="tickonlyfalse">T.last t' == '\\'</span> -&gt; <span class="nottickedoff">t' &lt;&gt; &quot;#&quot;</span></span>
+<span class="lineno">  511 </span><span class="spaces">                                    </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span> -&gt; t'</span></span>
+<span class="lineno">  512 </span>
+<span class="lineno">  513 </span>-- Scanners
+<span class="lineno">  514 </span>
+<span class="lineno">  515 </span>scanReference :: Scanner
+<span class="lineno">  516 </span><span class="decl"><span class="istickedoff">scanReference = <span class="nottickedoff">()</span> &lt;$ lookAhead (pLinkLabel &gt;&gt; scanChar ':')</span></span>
+<span class="lineno">  517 </span>
+<span class="lineno">  518 </span>-- Scan the beginning of a blockquote:  up to three
+<span class="lineno">  519 </span>-- spaces indent, the `&gt;` character, and an optional space.
+<span class="lineno">  520 </span>scanBlockquoteStart :: Scanner
+<span class="lineno">  521 </span><span class="decl"><span class="istickedoff">scanBlockquoteStart = scanChar '&gt;' &gt;&gt; option <span class="nottickedoff">()</span> (scanChar ' ')</span></span>
+<span class="lineno">  522 </span>
+<span class="lineno">  523 </span>-- Parse the sequence of `#` characters that begins an ATX
+<span class="lineno">  524 </span>-- header, and return the number of characters.  We require
+<span class="lineno">  525 </span>-- a space after the initial string of `#`s, as not all markdown
+<span class="lineno">  526 </span>-- implementations do. This is because (a) the ATX reference
+<span class="lineno">  527 </span>-- implementation requires a space, and (b) since we're allowing
+<span class="lineno">  528 </span>-- headers without preceding blank lines, requiring the space
+<span class="lineno">  529 </span>-- avoids accidentally capturing a line like `#8 toggle bolt` as
+<span class="lineno">  530 </span>-- a header.
+<span class="lineno">  531 </span>parseAtxHeaderStart :: Parser Int
+<span class="lineno">  532 </span><span class="decl"><span class="istickedoff">parseAtxHeaderStart = do</span>
+<span class="lineno">  533 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char '#'</span>
+<span class="lineno">  534 </span><span class="spaces">  </span><span class="istickedoff">hashes &lt;- upToCountChars 5 (== '#')</span>
+<span class="lineno">  535 </span><span class="spaces">  </span><span class="istickedoff">-- hashes must be followed by space unless empty header:</span>
+<span class="lineno">  536 </span><span class="spaces">  </span><span class="istickedoff">notFollowedBy (skip (/= ' '))</span>
+<span class="lineno">  537 </span><span class="spaces">  </span><span class="istickedoff">return $ T.length hashes + 1</span></span>
+<span class="lineno">  538 </span>
+<span class="lineno">  539 </span>parseSetextHeaderLine :: Parser Int
+<span class="lineno">  540 </span><span class="decl"><span class="istickedoff">parseSetextHeaderLine = do</span>
+<span class="lineno">  541 </span><span class="spaces">  </span><span class="istickedoff">d &lt;- satisfy (\c -&gt; c == '-' || c == '=')</span>
+<span class="lineno">  542 </span><span class="spaces">  </span><span class="istickedoff">let <span class="nottickedoff">lev = if d == '=' then 1 else 2</span></span>
+<span class="lineno">  543 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">skipWhile (== d)</span></span>
+<span class="lineno">  544 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">scanBlankline</span></span>
+<span class="lineno">  545 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">return lev</span></span></span>
+<span class="lineno">  546 </span>
+<span class="lineno">  547 </span>-- Scan a horizontal rule line: &quot;...three or more hyphens, asterisks,
+<span class="lineno">  548 </span>-- or underscores on a line by themselves. If you wish, you may use
+<span class="lineno">  549 </span>-- spaces between the hyphens or asterisks.&quot;
+<span class="lineno">  550 </span>scanHRuleLine :: Scanner
+<span class="lineno">  551 </span><span class="decl"><span class="istickedoff">scanHRuleLine = do</span>
+<span class="lineno">  552 </span><span class="spaces">  </span><span class="istickedoff">c &lt;- satisfy (\c -&gt; c == '*' || c == '_' || c == '-')</span>
+<span class="lineno">  553 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- count 2 $ scanSpaces &gt;&gt; skip (== c)</span>
+<span class="lineno">  554 </span><span class="spaces">  </span><span class="istickedoff">skipWhile <span class="nottickedoff">(\x -&gt; x == ' ' || x == c)</span></span>
+<span class="lineno">  555 </span><span class="spaces">  </span><span class="istickedoff">endOfInput</span></span>
+<span class="lineno">  556 </span>
+<span class="lineno">  557 </span>-- Parse an initial code fence line, returning
+<span class="lineno">  558 </span>-- the fence part and the rest (after any spaces).
+<span class="lineno">  559 </span>parseCodeFence :: Parser ContainerType
+<span class="lineno">  560 </span><span class="decl"><span class="istickedoff">parseCodeFence = do</span>
+<span class="lineno">  561 </span><span class="spaces">  </span><span class="istickedoff">col &lt;- column &lt;$&gt; getPosition</span>
+<span class="lineno">  562 </span><span class="spaces">  </span><span class="istickedoff">cs &lt;- takeWhile1 (=='`') &lt;|&gt; takeWhile1 (=='~')</span>
+<span class="lineno">  563 </span><span class="spaces">  </span><span class="istickedoff">guard $ T.length cs &gt;= 3</span>
+<span class="lineno">  564 </span><span class="spaces">  </span><span class="istickedoff">scanSpaces</span>
+<span class="lineno">  565 </span><span class="spaces">  </span><span class="istickedoff">rawattr &lt;- takeWhile (\c -&gt; c /= '`' &amp;&amp; c /= '~')</span>
+<span class="lineno">  566 </span><span class="spaces">  </span><span class="istickedoff">endOfInput</span>
+<span class="lineno">  567 </span><span class="spaces">  </span><span class="istickedoff">return $ FencedCode { startColumn = col</span>
+<span class="lineno">  568 </span><span class="spaces">                      </span><span class="istickedoff">, fence = cs</span>
+<span class="lineno">  569 </span><span class="spaces">                      </span><span class="istickedoff">, info = rawattr }</span></span>
+<span class="lineno">  570 </span>
+<span class="lineno">  571 </span>-- Parse the start of an HTML block:  either an HTML tag or an
+<span class="lineno">  572 </span>-- HTML comment, with no indentation.
+<span class="lineno">  573 </span>parseHtmlBlockStart :: Parser ()
+<span class="lineno">  574 </span><span class="decl"><span class="istickedoff">parseHtmlBlockStart = <span class="nottickedoff">()</span> &lt;$ lookAhead</span>
+<span class="lineno">  575 </span><span class="spaces">     </span><span class="istickedoff">((do t &lt;- pHtmlTag</span>
+<span class="lineno">  576 </span><span class="spaces">          </span><span class="istickedoff">guard $ f $ fst t</span>
+<span class="lineno">  577 </span><span class="spaces">          </span><span class="istickedoff">return $ <span class="nottickedoff">snd t</span>)</span>
+<span class="lineno">  578 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; string &quot;&lt;!--&quot;</span>
+<span class="lineno">  579 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; string &quot;--&gt;&quot;</span>
+<span class="lineno">  580 </span><span class="spaces">     </span><span class="istickedoff">)</span>
+<span class="lineno">  581 </span><span class="spaces"> </span><span class="istickedoff">where f (Opening name) = name `Set.member` blockHtmlTags</span>
+<span class="lineno">  582 </span><span class="spaces">       </span><span class="istickedoff">f (SelfClosing name) = <span class="nottickedoff">name `Set.member` blockHtmlTags</span></span>
+<span class="lineno">  583 </span><span class="spaces">       </span><span class="istickedoff">f (Closing name) = <span class="nottickedoff">name `Set.member` blockHtmlTags</span></span></span>
+<span class="lineno">  584 </span>
+<span class="lineno">  585 </span>-- List of block level tags for HTML 5.
+<span class="lineno">  586 </span>blockHtmlTags :: Set.Set Text
+<span class="lineno">  587 </span><span class="decl"><span class="istickedoff">blockHtmlTags = Set.fromList</span>
+<span class="lineno">  588 </span><span class="spaces"> </span><span class="istickedoff">[ &quot;article&quot;, &quot;header&quot;, &quot;aside&quot;, &quot;hgroup&quot;, &quot;blockquote&quot;, &quot;hr&quot;,</span>
+<span class="lineno">  589 </span><span class="spaces">   </span><span class="istickedoff">&quot;body&quot;, &quot;li&quot;, &quot;br&quot;, &quot;map&quot;, &quot;button&quot;, &quot;object&quot;, &quot;canvas&quot;, &quot;ol&quot;,</span>
+<span class="lineno">  590 </span><span class="spaces">   </span><span class="istickedoff">&quot;caption&quot;, &quot;output&quot;, &quot;col&quot;, &quot;p&quot;, &quot;colgroup&quot;, &quot;pre&quot;, &quot;dd&quot;,</span>
+<span class="lineno">  591 </span><span class="spaces">   </span><span class="istickedoff">&quot;progress&quot;, &quot;div&quot;, &quot;section&quot;, &quot;dl&quot;, &quot;table&quot;, &quot;dt&quot;, &quot;tbody&quot;,</span>
+<span class="lineno">  592 </span><span class="spaces">   </span><span class="istickedoff">&quot;embed&quot;, &quot;textarea&quot;, &quot;fieldset&quot;, &quot;tfoot&quot;, &quot;figcaption&quot;, &quot;th&quot;,</span>
+<span class="lineno">  593 </span><span class="spaces">   </span><span class="istickedoff">&quot;figure&quot;, &quot;thead&quot;, &quot;footer&quot;, &quot;footer&quot;, &quot;tr&quot;, &quot;form&quot;, &quot;ul&quot;,</span>
+<span class="lineno">  594 </span><span class="spaces">   </span><span class="istickedoff">&quot;h1&quot;, &quot;h2&quot;, &quot;h3&quot;, &quot;h4&quot;, &quot;h5&quot;, &quot;h6&quot;, &quot;video&quot;]</span></span>
+<span class="lineno">  595 </span>
+<span class="lineno">  596 </span>-- Parse a list marker and return the list type.
+<span class="lineno">  597 </span>parseListMarker :: Parser ContainerType
+<span class="lineno">  598 </span><span class="decl"><span class="istickedoff">parseListMarker = do</span>
+<span class="lineno">  599 </span><span class="spaces">  </span><span class="istickedoff">col &lt;- column &lt;$&gt; getPosition</span>
+<span class="lineno">  600 </span><span class="spaces">  </span><span class="istickedoff">ty &lt;- parseBullet &lt;|&gt; parseListNumber</span>
+<span class="lineno">  601 </span><span class="spaces">  </span><span class="istickedoff">-- padding is 1 if list marker followed by a blank line</span>
+<span class="lineno">  602 </span><span class="spaces">  </span><span class="istickedoff">-- or indented code.  otherwise it's the length of the</span>
+<span class="lineno">  603 </span><span class="spaces">  </span><span class="istickedoff">-- whitespace between the list marker and the following text:</span>
+<span class="lineno">  604 </span><span class="spaces">  </span><span class="istickedoff">padding' &lt;- (<span class="nottickedoff">1</span> &lt;$ scanBlankline)</span>
+<span class="lineno">  605 </span><span class="spaces">          </span><span class="istickedoff">&lt;|&gt; (<span class="nottickedoff">1</span> &lt;$ (skip (==' ') *&gt; lookAhead (count 4 (char ' '))))</span>
+<span class="lineno">  606 </span><span class="spaces">          </span><span class="istickedoff">&lt;|&gt; (T.length &lt;$&gt; takeWhile (==' '))</span>
+<span class="lineno">  607 </span><span class="spaces">  </span><span class="istickedoff">-- text can't immediately follow the list marker:</span>
+<span class="lineno">  608 </span><span class="spaces">  </span><span class="istickedoff">guard $ padding' &gt; 0</span>
+<span class="lineno">  609 </span><span class="spaces">  </span><span class="istickedoff">return $ ListItem { listType = ty</span>
+<span class="lineno">  610 </span><span class="spaces">                    </span><span class="istickedoff">, markerColumn = col</span>
+<span class="lineno">  611 </span><span class="spaces">                    </span><span class="istickedoff">, padding = padding' + listMarkerWidth ty</span>
+<span class="lineno">  612 </span><span class="spaces">                    </span><span class="istickedoff">}</span></span>
+<span class="lineno">  613 </span>
+<span class="lineno">  614 </span>listMarkerWidth :: ListType -&gt; Int
+<span class="lineno">  615 </span><span class="decl"><span class="istickedoff">listMarkerWidth (Bullet _) = 1</span>
+<span class="lineno">  616 </span><span class="spaces"></span><span class="istickedoff">listMarkerWidth (Numbered _ n) | <span class="tickonlytrue">n &lt; 10</span>    = 2</span>
+<span class="lineno">  617 </span><span class="spaces">                               </span><span class="istickedoff">| <span class="nottickedoff">n &lt; 100</span>   = <span class="nottickedoff">3</span></span>
+<span class="lineno">  618 </span><span class="spaces">                               </span><span class="istickedoff">| <span class="nottickedoff">n &lt; 1000</span>  = <span class="nottickedoff">4</span></span>
+<span class="lineno">  619 </span><span class="spaces">                               </span><span class="istickedoff">| <span class="nottickedoff">otherwise</span> = <span class="nottickedoff">5</span></span></span>
+<span class="lineno">  620 </span>
+<span class="lineno">  621 </span>-- Parse a bullet and return list type.
+<span class="lineno">  622 </span>parseBullet :: Parser ListType
+<span class="lineno">  623 </span><span class="decl"><span class="istickedoff">parseBullet = do</span>
+<span class="lineno">  624 </span><span class="spaces">  </span><span class="istickedoff">c &lt;- satisfy (\c -&gt; c == '+' || c == '*' || c == '-')</span>
+<span class="lineno">  625 </span><span class="spaces">  </span><span class="istickedoff">unless (c == '+')</span>
+<span class="lineno">  626 </span><span class="spaces">    </span><span class="istickedoff">$ nfb $ (count 2 $ scanSpaces &gt;&gt; skip (== c)) &gt;&gt;</span>
+<span class="lineno">  627 </span><span class="spaces">          </span><span class="istickedoff">skipWhile <span class="nottickedoff">(\x -&gt; x == ' ' || x == c)</span> &gt;&gt; endOfInput -- hrule</span>
+<span class="lineno">  628 </span><span class="spaces">  </span><span class="istickedoff">return $ Bullet c</span></span>
+<span class="lineno">  629 </span>
+<span class="lineno">  630 </span>-- Parse a list number marker and return list type.
+<span class="lineno">  631 </span>parseListNumber :: Parser ListType
+<span class="lineno">  632 </span><span class="decl"><span class="istickedoff">parseListNumber = do</span>
+<span class="lineno">  633 </span><span class="spaces">    </span><span class="istickedoff">num &lt;- (read . T.unpack) &lt;$&gt; takeWhile1 isDigit</span>
+<span class="lineno">  634 </span><span class="spaces">    </span><span class="istickedoff">wrap &lt;-  PeriodFollowing &lt;$ skip (== '.')</span>
+<span class="lineno">  635 </span><span class="spaces">         </span><span class="istickedoff">&lt;|&gt; <span class="nottickedoff">ParenFollowing &lt;$ skip (== ')')</span></span>
+<span class="lineno">  636 </span><span class="spaces">    </span><span class="istickedoff">return $ Numbered wrap num</span></span>
+
+</pre>
+</body>
+</html>

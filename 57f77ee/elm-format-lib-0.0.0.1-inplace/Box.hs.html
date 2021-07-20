@@ -1,0 +1,335 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# OPTIONS_GHC -Wall #-}
+<span class="lineno">    2 </span>module Box
+<span class="lineno">    3 </span>  ( Line, identifier, keyword, punc, literal, row, space
+<span class="lineno">    4 </span>  , Box(SingleLine, MustBreak), blankLine, line, mustBreak, stack', stack1, andThen
+<span class="lineno">    5 </span>  , isLine, allSingles, lineLength
+<span class="lineno">    6 </span>  , indent, prefix, addSuffix
+<span class="lineno">    7 </span>  , render
+<span class="lineno">    8 </span>  ) where
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>import Elm.Utils ((|&gt;))
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>import qualified Data.Text as T
+<span class="lineno">   13 </span>
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>{-
+<span class="lineno">   16 </span>A line is ALWAYS just one line.
+<span class="lineno">   17 </span>
+<span class="lineno">   18 </span>Space is self-explanatory,
+<span class="lineno">   19 </span>  Tab aligns to the nearest multiple of 4 spaces,
+<span class="lineno">   20 </span>  Text brings any string into the data structure,
+<span class="lineno">   21 </span>  Row joins more of these elements onto one line.
+<span class="lineno">   22 </span>-}
+<span class="lineno">   23 </span>data Line
+<span class="lineno">   24 </span>    = Text T.Text
+<span class="lineno">   25 </span>    | Row [Line]
+<span class="lineno">   26 </span>    | Space
+<span class="lineno">   27 </span>    | Tab
+<span class="lineno">   28 </span>
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>identifier :: String -&gt; Line
+<span class="lineno">   31 </span><span class="decl"><span class="istickedoff">identifier =</span>
+<span class="lineno">   32 </span><span class="spaces">    </span><span class="istickedoff">Text . T.pack</span></span>
+<span class="lineno">   33 </span>
+<span class="lineno">   34 </span>
+<span class="lineno">   35 </span>keyword :: String -&gt; Line
+<span class="lineno">   36 </span><span class="decl"><span class="istickedoff">keyword =</span>
+<span class="lineno">   37 </span><span class="spaces">    </span><span class="istickedoff">Text . T.pack</span></span>
+<span class="lineno">   38 </span>
+<span class="lineno">   39 </span>
+<span class="lineno">   40 </span>punc :: String -&gt; Line
+<span class="lineno">   41 </span><span class="decl"><span class="istickedoff">punc =</span>
+<span class="lineno">   42 </span><span class="spaces">    </span><span class="istickedoff">Text . T.pack</span></span>
+<span class="lineno">   43 </span>
+<span class="lineno">   44 </span>
+<span class="lineno">   45 </span>literal :: String -&gt; Line
+<span class="lineno">   46 </span><span class="decl"><span class="istickedoff">literal =</span>
+<span class="lineno">   47 </span><span class="spaces">    </span><span class="istickedoff">Text . T.pack</span></span>
+<span class="lineno">   48 </span>
+<span class="lineno">   49 </span>
+<span class="lineno">   50 </span>-- join more Line elements into one
+<span class="lineno">   51 </span>row :: [Line] -&gt; Line
+<span class="lineno">   52 </span><span class="decl"><span class="istickedoff">row =</span>
+<span class="lineno">   53 </span><span class="spaces">    </span><span class="istickedoff">Row</span></span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>
+<span class="lineno">   56 </span>space :: Line
+<span class="lineno">   57 </span><span class="decl"><span class="istickedoff">space =</span>
+<span class="lineno">   58 </span><span class="spaces">    </span><span class="istickedoff">Space</span></span>
+<span class="lineno">   59 </span>
+<span class="lineno">   60 </span>
+<span class="lineno">   61 </span>{-
+<span class="lineno">   62 </span>Box contains Lines (at least one - can't be empty).
+<span class="lineno">   63 </span>Box either:
+<span class="lineno">   64 </span>  - can appear in the middle of a line
+<span class="lineno">   65 </span>      (Stack someLine [], thus can be joined without problems), or
+<span class="lineno">   66 </span>  - has to appear on its own
+<span class="lineno">   67 </span>      (Stack someLine moreLines OR MustBreak someLine).
+<span class="lineno">   68 </span>
+<span class="lineno">   69 </span>MustBreak is only used for `--` comments.
+<span class="lineno">   70 </span>
+<span class="lineno">   71 </span>Stack contains two or more lines.
+<span class="lineno">   72 </span>
+<span class="lineno">   73 </span>Sometimes (see `prefix`) the first line of Stack
+<span class="lineno">   74 </span>  gets different treatment than the other lines.
+<span class="lineno">   75 </span>-}
+<span class="lineno">   76 </span>data Box
+<span class="lineno">   77 </span>    = SingleLine Line
+<span class="lineno">   78 </span>    | Stack Line Line [Line]
+<span class="lineno">   79 </span>    | MustBreak Line
+<span class="lineno">   80 </span>
+<span class="lineno">   81 </span>
+<span class="lineno">   82 </span>blankLine :: Box
+<span class="lineno">   83 </span><span class="decl"><span class="istickedoff">blankLine =</span>
+<span class="lineno">   84 </span><span class="spaces">    </span><span class="istickedoff">line $ literal &quot;&quot;</span></span>
+<span class="lineno">   85 </span>
+<span class="lineno">   86 </span>
+<span class="lineno">   87 </span>line :: Line -&gt; Box
+<span class="lineno">   88 </span><span class="decl"><span class="istickedoff">line l =</span>
+<span class="lineno">   89 </span><span class="spaces">    </span><span class="istickedoff">SingleLine l</span></span>
+<span class="lineno">   90 </span>
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>mustBreak :: Line -&gt; Box
+<span class="lineno">   93 </span><span class="decl"><span class="istickedoff">mustBreak l =</span>
+<span class="lineno">   94 </span><span class="spaces">    </span><span class="istickedoff">MustBreak l</span></span>
+<span class="lineno">   95 </span>
+<span class="lineno">   96 </span>
+<span class="lineno">   97 </span>stack' :: Box -&gt; Box -&gt; Box
+<span class="lineno">   98 </span><span class="decl"><span class="istickedoff">stack' b1 b2 =</span>
+<span class="lineno">   99 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  100 </span><span class="spaces">        </span><span class="istickedoff">(line1first, line1rest) = destructure b1</span>
+<span class="lineno">  101 </span><span class="spaces">        </span><span class="istickedoff">(line2first, line2rest) = destructure b2</span>
+<span class="lineno">  102 </span><span class="spaces">    </span><span class="istickedoff">in case line1rest ++ line2first:line2rest of</span>
+<span class="lineno">  103 </span><span class="spaces">        </span><span class="istickedoff">[] -&gt;</span>
+<span class="lineno">  104 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">error &quot;the list will contain at least line2first&quot;</span></span>
+<span class="lineno">  105 </span><span class="spaces">        </span><span class="istickedoff">first : rest -&gt;</span>
+<span class="lineno">  106 </span><span class="spaces">            </span><span class="istickedoff">Stack line1first first rest</span></span>
+<span class="lineno">  107 </span>
+<span class="lineno">  108 </span>
+<span class="lineno">  109 </span>andThen :: [Box] -&gt; Box -&gt; Box
+<span class="lineno">  110 </span><span class="decl"><span class="istickedoff">andThen rest first =</span>
+<span class="lineno">  111 </span><span class="spaces">    </span><span class="istickedoff">foldl stack' first rest</span></span>
+<span class="lineno">  112 </span>
+<span class="lineno">  113 </span>
+<span class="lineno">  114 </span>stack1 :: [Box] -&gt; Box
+<span class="lineno">  115 </span><span class="decl"><span class="istickedoff">stack1 children =</span>
+<span class="lineno">  116 </span><span class="spaces">    </span><span class="istickedoff">case children of</span>
+<span class="lineno">  117 </span><span class="spaces">        </span><span class="istickedoff">[] -&gt;</span>
+<span class="lineno">  118 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">error &quot;stack1: empty structure&quot;</span></span>
+<span class="lineno">  119 </span><span class="spaces">        </span><span class="istickedoff">[first] -&gt;</span>
+<span class="lineno">  120 </span><span class="spaces">            </span><span class="istickedoff">first</span>
+<span class="lineno">  121 </span><span class="spaces">        </span><span class="istickedoff">boxes -&gt;</span>
+<span class="lineno">  122 </span><span class="spaces">            </span><span class="istickedoff">foldr1 stack' boxes</span></span>
+<span class="lineno">  123 </span>
+<span class="lineno">  124 </span>
+<span class="lineno">  125 </span>mapLines :: (Line -&gt; Line) -&gt; Box -&gt; Box
+<span class="lineno">  126 </span><span class="decl"><span class="istickedoff">mapLines fn =</span>
+<span class="lineno">  127 </span><span class="spaces">    </span><span class="istickedoff">mapFirstLine fn fn</span></span>
+<span class="lineno">  128 </span>
+<span class="lineno">  129 </span>
+<span class="lineno">  130 </span>mapFirstLine :: (Line -&gt; Line) -&gt; (Line -&gt; Line) -&gt; Box -&gt; Box
+<span class="lineno">  131 </span><span class="decl"><span class="istickedoff">mapFirstLine firstFn restFn b =</span>
+<span class="lineno">  132 </span><span class="spaces">    </span><span class="istickedoff">case b of</span>
+<span class="lineno">  133 </span><span class="spaces">        </span><span class="istickedoff">SingleLine l1 -&gt;</span>
+<span class="lineno">  134 </span><span class="spaces">            </span><span class="istickedoff">SingleLine (firstFn l1)</span>
+<span class="lineno">  135 </span><span class="spaces">        </span><span class="istickedoff">Stack l1 l2 ls -&gt;</span>
+<span class="lineno">  136 </span><span class="spaces">            </span><span class="istickedoff">Stack (firstFn l1) (restFn l2) (map restFn ls)</span>
+<span class="lineno">  137 </span><span class="spaces">        </span><span class="istickedoff">MustBreak l1 -&gt;</span>
+<span class="lineno">  138 </span><span class="spaces">            </span><span class="istickedoff">MustBreak (firstFn l1)</span></span>
+<span class="lineno">  139 </span>
+<span class="lineno">  140 </span>
+<span class="lineno">  141 </span>indent :: Box -&gt; Box
+<span class="lineno">  142 </span><span class="decl"><span class="istickedoff">indent =</span>
+<span class="lineno">  143 </span><span class="spaces">    </span><span class="istickedoff">mapLines (\l -&gt; row [Tab, l])</span></span>
+<span class="lineno">  144 </span>
+<span class="lineno">  145 </span>
+<span class="lineno">  146 </span>isLine :: Box -&gt; Either Box Line
+<span class="lineno">  147 </span><span class="decl"><span class="istickedoff">isLine b =</span>
+<span class="lineno">  148 </span><span class="spaces">    </span><span class="istickedoff">case b of</span>
+<span class="lineno">  149 </span><span class="spaces">        </span><span class="istickedoff">SingleLine l -&gt;</span>
+<span class="lineno">  150 </span><span class="spaces">            </span><span class="istickedoff">Right l</span>
+<span class="lineno">  151 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  152 </span><span class="spaces">            </span><span class="istickedoff">Left <span class="nottickedoff">b</span></span></span>
+<span class="lineno">  153 </span>
+<span class="lineno">  154 </span>
+<span class="lineno">  155 </span>destructure :: Box -&gt; (Line, [Line])
+<span class="lineno">  156 </span><span class="decl"><span class="istickedoff">destructure b =</span>
+<span class="lineno">  157 </span><span class="spaces">    </span><span class="istickedoff">case b of</span>
+<span class="lineno">  158 </span><span class="spaces">        </span><span class="istickedoff">SingleLine l1 -&gt;</span>
+<span class="lineno">  159 </span><span class="spaces">            </span><span class="istickedoff">(l1, [])</span>
+<span class="lineno">  160 </span><span class="spaces">        </span><span class="istickedoff">Stack l1 l2 rest -&gt;</span>
+<span class="lineno">  161 </span><span class="spaces">            </span><span class="istickedoff">(l1, l2 : rest)</span>
+<span class="lineno">  162 </span><span class="spaces">        </span><span class="istickedoff">MustBreak l1 -&gt;</span>
+<span class="lineno">  163 </span><span class="spaces">            </span><span class="istickedoff">(l1, [])</span></span>
+<span class="lineno">  164 </span>
+<span class="lineno">  165 </span>
+<span class="lineno">  166 </span>allSingles :: [Box] -&gt; Either [Box] [Line]
+<span class="lineno">  167 </span><span class="decl"><span class="istickedoff">allSingles boxes =</span>
+<span class="lineno">  168 </span><span class="spaces">    </span><span class="istickedoff">case sequence $ map isLine boxes of</span>
+<span class="lineno">  169 </span><span class="spaces">        </span><span class="istickedoff">Right lines' -&gt;</span>
+<span class="lineno">  170 </span><span class="spaces">            </span><span class="istickedoff">Right lines'</span>
+<span class="lineno">  171 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  172 </span><span class="spaces">            </span><span class="istickedoff">Left boxes</span></span>
+<span class="lineno">  173 </span>
+<span class="lineno">  174 </span>
+<span class="lineno">  175 </span>{-
+<span class="lineno">  176 </span>Add the prefix to the first line,
+<span class="lineno">  177 </span>pad the other lines with spaces of the same length
+<span class="lineno">  178 </span>
+<span class="lineno">  179 </span>EXAMPLE:
+<span class="lineno">  180 </span>abcde
+<span class="lineno">  181 </span>xyz
+<span class="lineno">  182 </span>-----&gt;
+<span class="lineno">  183 </span>myPrefix abcde
+<span class="lineno">  184 </span>         xyz
+<span class="lineno">  185 </span>-}
+<span class="lineno">  186 </span>prefix :: Line -&gt; Box -&gt; Box
+<span class="lineno">  187 </span><span class="decl"><span class="istickedoff">prefix pref =</span>
+<span class="lineno">  188 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  189 </span><span class="spaces">        </span><span class="istickedoff">prefixLength = lineLength 0 pref</span>
+<span class="lineno">  190 </span><span class="spaces">        </span><span class="istickedoff">paddingSpaces = replicate prefixLength space</span>
+<span class="lineno">  191 </span><span class="spaces">        </span><span class="istickedoff">padLineWithSpaces l = row [ row paddingSpaces, l ]</span>
+<span class="lineno">  192 </span><span class="spaces">        </span><span class="istickedoff">addPrefixToLine l = row [ pref, l ]</span>
+<span class="lineno">  193 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  194 </span><span class="spaces">      </span><span class="istickedoff">mapFirstLine addPrefixToLine padLineWithSpaces</span></span>
+<span class="lineno">  195 </span>
+<span class="lineno">  196 </span>
+<span class="lineno">  197 </span>addSuffix :: Line -&gt; Box -&gt; Box
+<span class="lineno">  198 </span><span class="decl"><span class="istickedoff">addSuffix suffix b =</span>
+<span class="lineno">  199 </span><span class="spaces">    </span><span class="istickedoff">case destructure b of</span>
+<span class="lineno">  200 </span><span class="spaces">        </span><span class="istickedoff">(l,[]) -&gt;</span>
+<span class="lineno">  201 </span><span class="spaces">            </span><span class="istickedoff">line $ row [ l, suffix ]</span>
+<span class="lineno">  202 </span><span class="spaces">        </span><span class="istickedoff">(l1,ls) -&gt;</span>
+<span class="lineno">  203 </span><span class="spaces">            </span><span class="istickedoff">line l1</span>
+<span class="lineno">  204 </span><span class="spaces">                </span><span class="istickedoff">|&gt; andThen (map line $ init ls)</span>
+<span class="lineno">  205 </span><span class="spaces">                </span><span class="istickedoff">|&gt; andThen [ line $ row [ last ls, suffix ] ]</span></span>
+<span class="lineno">  206 </span>
+<span class="lineno">  207 </span>
+<span class="lineno">  208 </span>renderLine :: Int -&gt; Line -&gt; T.Text
+<span class="lineno">  209 </span><span class="decl"><span class="istickedoff">renderLine startColumn line' =</span>
+<span class="lineno">  210 </span><span class="spaces">    </span><span class="istickedoff">case line' of</span>
+<span class="lineno">  211 </span><span class="spaces">        </span><span class="istickedoff">Text text -&gt;</span>
+<span class="lineno">  212 </span><span class="spaces">            </span><span class="istickedoff">text</span>
+<span class="lineno">  213 </span><span class="spaces">        </span><span class="istickedoff">Space -&gt;</span>
+<span class="lineno">  214 </span><span class="spaces">            </span><span class="istickedoff">T.singleton ' '</span>
+<span class="lineno">  215 </span><span class="spaces">        </span><span class="istickedoff">Tab -&gt;</span>
+<span class="lineno">  216 </span><span class="spaces">            </span><span class="istickedoff">T.pack $ replicate (tabLength startColumn) ' '</span>
+<span class="lineno">  217 </span><span class="spaces">        </span><span class="istickedoff">Row lines' -&gt;</span>
+<span class="lineno">  218 </span><span class="spaces">            </span><span class="istickedoff">renderRow startColumn lines'</span></span>
+<span class="lineno">  219 </span>
+<span class="lineno">  220 </span>
+<span class="lineno">  221 </span>render :: Box -&gt; T.Text
+<span class="lineno">  222 </span><span class="decl"><span class="istickedoff">render box' =</span>
+<span class="lineno">  223 </span><span class="spaces">    </span><span class="istickedoff">case box' of</span>
+<span class="lineno">  224 </span><span class="spaces">        </span><span class="istickedoff">SingleLine line' -&gt;</span>
+<span class="lineno">  225 </span><span class="spaces">            </span><span class="istickedoff">T.snoc (T.stripEnd $ renderLine <span class="nottickedoff">0</span> line') '\n'</span>
+<span class="lineno">  226 </span><span class="spaces">        </span><span class="istickedoff">Stack l1 l2 rest -&gt;</span>
+<span class="lineno">  227 </span><span class="spaces">            </span><span class="istickedoff">T.unlines $ map (T.stripEnd . renderLine 0) (l1 : l2 : rest)</span>
+<span class="lineno">  228 </span><span class="spaces">        </span><span class="istickedoff">MustBreak line' -&gt;</span>
+<span class="lineno">  229 </span><span class="spaces">            </span><span class="istickedoff">T.snoc (T.stripEnd $ renderLine <span class="nottickedoff">0</span> line') '\n'</span></span>
+<span class="lineno">  230 </span>
+<span class="lineno">  231 </span>
+<span class="lineno">  232 </span>lineLength :: Int -&gt; Line -&gt; Int
+<span class="lineno">  233 </span><span class="decl"><span class="istickedoff">lineLength startColumn line' =</span>
+<span class="lineno">  234 </span><span class="spaces">   </span><span class="istickedoff">startColumn +</span>
+<span class="lineno">  235 </span><span class="spaces">      </span><span class="istickedoff">case line' of</span>
+<span class="lineno">  236 </span><span class="spaces">         </span><span class="istickedoff">Text string -&gt; T.length string</span>
+<span class="lineno">  237 </span><span class="spaces">         </span><span class="istickedoff">Space -&gt; 1</span>
+<span class="lineno">  238 </span><span class="spaces">         </span><span class="istickedoff">Tab -&gt; tabLength startColumn</span>
+<span class="lineno">  239 </span><span class="spaces">         </span><span class="istickedoff">Row lines' -&gt; rowLength startColumn lines'</span></span>
+<span class="lineno">  240 </span>
+<span class="lineno">  241 </span>
+<span class="lineno">  242 </span>initRow :: Int -&gt; (T.Text, Int)
+<span class="lineno">  243 </span><span class="decl"><span class="istickedoff">initRow startColumn =</span>
+<span class="lineno">  244 </span><span class="spaces">  </span><span class="istickedoff">(T.empty, startColumn)</span></span>
+<span class="lineno">  245 </span>
+<span class="lineno">  246 </span>
+<span class="lineno">  247 </span>spacesInTab :: Int
+<span class="lineno">  248 </span><span class="decl"><span class="istickedoff">spacesInTab =</span>
+<span class="lineno">  249 </span><span class="spaces">  </span><span class="istickedoff">4</span></span>
+<span class="lineno">  250 </span>
+<span class="lineno">  251 </span>
+<span class="lineno">  252 </span>spacesToNextTab :: Int -&gt; Int
+<span class="lineno">  253 </span><span class="decl"><span class="istickedoff">spacesToNextTab startColumn =</span>
+<span class="lineno">  254 </span><span class="spaces">  </span><span class="istickedoff">startColumn `mod` spacesInTab</span></span>
+<span class="lineno">  255 </span>
+<span class="lineno">  256 </span>tabLength :: Int -&gt; Int
+<span class="lineno">  257 </span><span class="decl"><span class="istickedoff">tabLength startColumn =</span>
+<span class="lineno">  258 </span><span class="spaces">  </span><span class="istickedoff">spacesInTab - (spacesToNextTab startColumn)</span></span>
+<span class="lineno">  259 </span>
+<span class="lineno">  260 </span>{-
+<span class="lineno">  261 </span>What happens here is we take a row and start building its contents
+<span class="lineno">  262 </span>  along with the resulting length of the string. We need to have that
+<span class="lineno">  263 </span>  because of Tabs, which need to be passed the current column in arguments
+<span class="lineno">  264 </span>  in order to determine how many Spaces are they going to span.
+<span class="lineno">  265 </span>  (See `tabLength`.)
+<span class="lineno">  266 </span>
+<span class="lineno">  267 </span>So for example if we have a Box [Space, Tab, Text &quot;abc&quot;, Tab, Text &quot;x&quot;],
+<span class="lineno">  268 </span>  it goes like this:
+<span class="lineno">  269 </span>
+<span class="lineno">  270 </span>string      | column | todo
+<span class="lineno">  271 </span>&quot;&quot;          | 0      | [Space, Tab, Text &quot;abc&quot;, Tab, Text &quot;x&quot;]
+<span class="lineno">  272 </span>&quot; &quot;         | 1      | [Tab, Text &quot;abc&quot;, Tab, Text &quot;x&quot;]
+<span class="lineno">  273 </span>&quot;    &quot;      | 4      | [Text &quot;abc&quot;, Tab, Text &quot;x&quot;]
+<span class="lineno">  274 </span>&quot;    abc&quot;   | 7      | [Tab, Text &quot;x&quot;]
+<span class="lineno">  275 </span>&quot;    abc &quot;  | 8      | [Text &quot;x&quot;]
+<span class="lineno">  276 </span>&quot;    abc x&quot; | 9      | []
+<span class="lineno">  277 </span>
+<span class="lineno">  278 </span>Thus we get the result string with correctly rendered Tabs.
+<span class="lineno">  279 </span>
+<span class="lineno">  280 </span>The (T.Text, Int) type here means the (string, column) from the table above.
+<span class="lineno">  281 </span>
+<span class="lineno">  282 </span>Then we just need to do one final modification to get from endColumn to resultLength,
+<span class="lineno">  283 </span>  which is what we are after in the function `rowLength`.
+<span class="lineno">  284 </span>-}
+<span class="lineno">  285 </span>renderRow' :: Int -&gt; [Line] -&gt; (T.Text, Int)
+<span class="lineno">  286 </span><span class="decl"><span class="istickedoff">renderRow' startColumn lines' =</span>
+<span class="lineno">  287 </span><span class="spaces">  </span><span class="istickedoff">(result, resultLength)</span>
+<span class="lineno">  288 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  289 </span><span class="spaces">    </span><span class="istickedoff">(result, endColumn) = foldl addLine (initRow startColumn) lines'</span>
+<span class="lineno">  290 </span><span class="spaces">    </span><span class="istickedoff">resultLength = endColumn - startColumn</span></span>
+<span class="lineno">  291 </span>
+<span class="lineno">  292 </span>{-
+<span class="lineno">  293 </span>A step function for renderRow'.
+<span class="lineno">  294 </span>
+<span class="lineno">  295 </span>addLine (&quot; &quot;,1) Tab == (&quot;    &quot;,4)
+<span class="lineno">  296 </span>-}
+<span class="lineno">  297 </span>addLine :: (T.Text, Int) -&gt; Line -&gt; (T.Text, Int)
+<span class="lineno">  298 </span><span class="decl"><span class="istickedoff">addLine (string, startColumn') line' =</span>
+<span class="lineno">  299 </span><span class="spaces">  </span><span class="istickedoff">(newString, newStartColumn)</span>
+<span class="lineno">  300 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  301 </span><span class="spaces">    </span><span class="istickedoff">newString = T.append string $ renderLine startColumn' line'</span>
+<span class="lineno">  302 </span><span class="spaces">    </span><span class="istickedoff">newStartColumn = lineLength startColumn' line'</span></span>
+<span class="lineno">  303 </span>
+<span class="lineno">  304 </span>-- Extract the final string from renderRow'
+<span class="lineno">  305 </span>renderRow :: Int -&gt; [Line] -&gt; T.Text
+<span class="lineno">  306 </span><span class="decl"><span class="istickedoff">renderRow startColumn lines' =</span>
+<span class="lineno">  307 </span><span class="spaces">  </span><span class="istickedoff">fst $ renderRow' startColumn lines'</span></span>
+<span class="lineno">  308 </span>
+<span class="lineno">  309 </span>-- Extract the final length from renderRow'
+<span class="lineno">  310 </span>rowLength :: Int -&gt; [Line] -&gt; Int
+<span class="lineno">  311 </span><span class="decl"><span class="istickedoff">rowLength startColumn lines' =</span>
+<span class="lineno">  312 </span><span class="spaces">  </span><span class="istickedoff">snd $ renderRow' startColumn lines'</span></span>
+
+</pre>
+</body>
+</html>

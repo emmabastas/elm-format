@@ -1,0 +1,590 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE FlexibleContexts #-}
+<span class="lineno">    2 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    3 </span>module Parse.Helpers where
+<span class="lineno">    4 </span>
+<span class="lineno">    5 </span>import Prelude hiding (until)
+<span class="lineno">    6 </span>import Control.Monad (guard)
+<span class="lineno">    7 </span>import qualified Data.Indexed as I
+<span class="lineno">    8 </span>import Data.Map.Strict hiding (foldl)
+<span class="lineno">    9 </span>import Text.Parsec hiding (newline, spaces, State)
+<span class="lineno">   10 </span>import Text.Parsec.Indent (indented, runIndent)
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>import AST.V0_16
+<span class="lineno">   13 </span>import qualified AST.Helpers as Help
+<span class="lineno">   14 </span>import AST.Structure (FixAST)
+<span class="lineno">   15 </span>import ElmVersion
+<span class="lineno">   16 </span>import qualified Parse.State as State
+<span class="lineno">   17 </span>import Parse.Comments
+<span class="lineno">   18 </span>import Parse.IParser
+<span class="lineno">   19 </span>import Parse.Whitespace
+<span class="lineno">   20 </span>import qualified Reporting.Annotation as A
+<span class="lineno">   21 </span>import qualified Reporting.Error.Syntax as Syntax
+<span class="lineno">   22 </span>import qualified Reporting.Region as R
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>reserveds :: [String]
+<span class="lineno">   26 </span><span class="decl"><span class="istickedoff">reserveds =</span>
+<span class="lineno">   27 </span><span class="spaces">    </span><span class="istickedoff">[ &quot;if&quot;, &quot;then&quot;, &quot;else&quot;</span>
+<span class="lineno">   28 </span><span class="spaces">    </span><span class="istickedoff">, &quot;case&quot;, &quot;of&quot;</span>
+<span class="lineno">   29 </span><span class="spaces">    </span><span class="istickedoff">, &quot;let&quot;, &quot;in&quot;</span>
+<span class="lineno">   30 </span><span class="spaces">    </span><span class="istickedoff">, &quot;type&quot;</span>
+<span class="lineno">   31 </span><span class="spaces">    </span><span class="istickedoff">, &quot;module&quot;, &quot;where&quot;</span>
+<span class="lineno">   32 </span><span class="spaces">    </span><span class="istickedoff">, &quot;import&quot;, &quot;exposing&quot;</span>
+<span class="lineno">   33 </span><span class="spaces">    </span><span class="istickedoff">, &quot;as&quot;</span>
+<span class="lineno">   34 </span><span class="spaces">    </span><span class="istickedoff">, &quot;port&quot;</span>
+<span class="lineno">   35 </span><span class="spaces">    </span><span class="istickedoff">]</span></span>
+<span class="lineno">   36 </span>
+<span class="lineno">   37 </span>-- ERROR HELP
+<span class="lineno">   38 </span>
+<span class="lineno">   39 </span>expecting :: String -&gt; IParser a -&gt; IParser a
+<span class="lineno">   40 </span><span class="decl"><span class="istickedoff">expecting = flip (&lt;?&gt;)</span></span>
+<span class="lineno">   41 </span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>-- SETUP
+<span class="lineno">   44 </span>
+<span class="lineno">   45 </span>iParse :: IParser a -&gt; String -&gt; Either ParseError a
+<span class="lineno">   46 </span><span class="decl"><span class="istickedoff">iParse =</span>
+<span class="lineno">   47 </span><span class="spaces">    </span><span class="istickedoff">iParseWithState &quot;&quot; State.init</span></span>
+<span class="lineno">   48 </span>
+<span class="lineno">   49 </span>
+<span class="lineno">   50 </span>iParseWithState :: SourceName -&gt; State.State -&gt; IParser a -&gt; String -&gt; Either ParseError a
+<span class="lineno">   51 </span><span class="decl"><span class="istickedoff">iParseWithState sourceName state aParser input =</span>
+<span class="lineno">   52 </span><span class="spaces">  </span><span class="istickedoff">runIndent <span class="nottickedoff">sourceName</span> $ runParserT aParser state sourceName input</span></span>
+<span class="lineno">   53 </span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>-- VARIABLES
+<span class="lineno">   56 </span>
+<span class="lineno">   57 </span>var :: ElmVersion -&gt; IParser (Ref [UppercaseIdentifier])
+<span class="lineno">   58 </span><span class="decl"><span class="istickedoff">var elmVersion =</span>
+<span class="lineno">   59 </span><span class="spaces">  </span><span class="istickedoff">try (qualifiedVar elmVersion) &lt;|&gt; qualifiedTag elmVersion &lt;?&gt; <span class="nottickedoff">&quot;a name&quot;</span></span></span>
+<span class="lineno">   60 </span>
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>lowVar :: ElmVersion -&gt; IParser LowercaseIdentifier
+<span class="lineno">   63 </span><span class="decl"><span class="istickedoff">lowVar elmVersion =</span>
+<span class="lineno">   64 </span><span class="spaces">  </span><span class="istickedoff">LowercaseIdentifier &lt;$&gt; makeVar elmVersion lower &lt;?&gt; <span class="nottickedoff">&quot;a lower case name&quot;</span></span></span>
+<span class="lineno">   65 </span>
+<span class="lineno">   66 </span>
+<span class="lineno">   67 </span>capVar :: ElmVersion -&gt; IParser UppercaseIdentifier
+<span class="lineno">   68 </span><span class="decl"><span class="istickedoff">capVar elmVersion =</span>
+<span class="lineno">   69 </span><span class="spaces">  </span><span class="istickedoff">UppercaseIdentifier &lt;$&gt; makeVar elmVersion upper &lt;?&gt; <span class="nottickedoff">&quot;an upper case name&quot;</span></span></span>
+<span class="lineno">   70 </span>
+<span class="lineno">   71 </span>
+<span class="lineno">   72 </span>qualifiedVar :: ElmVersion -&gt; IParser (Ref [UppercaseIdentifier])
+<span class="lineno">   73 </span><span class="decl"><span class="istickedoff">qualifiedVar elmVersion =</span>
+<span class="lineno">   74 </span><span class="spaces">    </span><span class="istickedoff">VarRef</span>
+<span class="lineno">   75 </span><span class="spaces">        </span><span class="istickedoff">&lt;$&gt; many (const &lt;$&gt; capVar elmVersion &lt;*&gt; string &quot;.&quot;)</span>
+<span class="lineno">   76 </span><span class="spaces">        </span><span class="istickedoff">&lt;*&gt; lowVar elmVersion</span></span>
+<span class="lineno">   77 </span>
+<span class="lineno">   78 </span>
+<span class="lineno">   79 </span>qualifiedTag :: ElmVersion -&gt; IParser (Ref [UppercaseIdentifier])
+<span class="lineno">   80 </span><span class="decl"><span class="istickedoff">qualifiedTag elmVersion =</span>
+<span class="lineno">   81 </span><span class="spaces">    </span><span class="istickedoff">TagRef</span>
+<span class="lineno">   82 </span><span class="spaces">        </span><span class="istickedoff">&lt;$&gt; many (try $ const &lt;$&gt; capVar elmVersion &lt;*&gt; string &quot;.&quot;)</span>
+<span class="lineno">   83 </span><span class="spaces">        </span><span class="istickedoff">&lt;*&gt; capVar elmVersion</span></span>
+<span class="lineno">   84 </span>
+<span class="lineno">   85 </span>
+<span class="lineno">   86 </span>rLabel :: ElmVersion -&gt; IParser LowercaseIdentifier
+<span class="lineno">   87 </span><span class="decl"><span class="istickedoff">rLabel = lowVar</span></span>
+<span class="lineno">   88 </span>
+<span class="lineno">   89 </span>
+<span class="lineno">   90 </span>innerVarChar :: ElmVersion -&gt; IParser Char
+<span class="lineno">   91 </span><span class="decl"><span class="istickedoff">innerVarChar elmVersion =</span>
+<span class="lineno">   92 </span><span class="spaces">    </span><span class="istickedoff">if syntax_0_19_disallowApostropheInVars elmVersion</span>
+<span class="lineno">   93 </span><span class="spaces">        </span><span class="istickedoff">then alphaNum &lt;|&gt; char '_' &lt;?&gt; <span class="nottickedoff">&quot;more letters in this name&quot;</span></span>
+<span class="lineno">   94 </span><span class="spaces">        </span><span class="istickedoff">else alphaNum &lt;|&gt; char '_' &lt;|&gt; char '\'' &lt;?&gt; <span class="nottickedoff">&quot;more letters in this name&quot;</span></span></span>
+<span class="lineno">   95 </span>
+<span class="lineno">   96 </span>
+<span class="lineno">   97 </span>makeVar :: ElmVersion -&gt; IParser Char -&gt; IParser String
+<span class="lineno">   98 </span><span class="decl"><span class="istickedoff">makeVar elmVersion firstChar =</span>
+<span class="lineno">   99 </span><span class="spaces">  </span><span class="istickedoff">do  variable &lt;- (:) &lt;$&gt; firstChar &lt;*&gt; many (innerVarChar elmVersion)</span>
+<span class="lineno">  100 </span><span class="spaces">      </span><span class="istickedoff">if variable `elem` reserveds</span>
+<span class="lineno">  101 </span><span class="spaces">        </span><span class="istickedoff">then fail <span class="nottickedoff">(Syntax.keyword variable)</span></span>
+<span class="lineno">  102 </span><span class="spaces">        </span><span class="istickedoff">else return variable</span></span>
+<span class="lineno">  103 </span>
+<span class="lineno">  104 </span>
+<span class="lineno">  105 </span>reserved :: ElmVersion -&gt; String -&gt; IParser ()
+<span class="lineno">  106 </span><span class="decl"><span class="istickedoff">reserved elmVersion word =</span>
+<span class="lineno">  107 </span><span class="spaces">  </span><span class="istickedoff">expecting <span class="nottickedoff">(&quot;reserved word `&quot; ++ word ++ &quot;`&quot;)</span> $</span>
+<span class="lineno">  108 </span><span class="spaces">    </span><span class="istickedoff">do  _ &lt;- string word</span>
+<span class="lineno">  109 </span><span class="spaces">        </span><span class="istickedoff">notFollowedBy (innerVarChar elmVersion)</span>
+<span class="lineno">  110 </span><span class="spaces">        </span><span class="istickedoff">return <span class="nottickedoff">()</span></span></span>
+<span class="lineno">  111 </span>
+<span class="lineno">  112 </span>
+<span class="lineno">  113 </span>-- INFIX OPERATORS
+<span class="lineno">  114 </span>
+<span class="lineno">  115 </span>anyOp :: ElmVersion -&gt; IParser (Ref [UppercaseIdentifier])
+<span class="lineno">  116 </span><span class="decl"><span class="istickedoff">anyOp elmVersion =</span>
+<span class="lineno">  117 </span><span class="spaces">  </span><span class="istickedoff">(betwixt '`' '`' (qualifiedVar elmVersion) &lt;?&gt; <span class="nottickedoff">&quot;an infix operator like `andThen`&quot;</span>)</span>
+<span class="lineno">  118 </span><span class="spaces">  </span><span class="istickedoff">&lt;|&gt; (OpRef &lt;$&gt; symOp)</span></span>
+<span class="lineno">  119 </span>
+<span class="lineno">  120 </span>
+<span class="lineno">  121 </span>symOp :: IParser SymbolIdentifier
+<span class="lineno">  122 </span><span class="decl"><span class="istickedoff">symOp =</span>
+<span class="lineno">  123 </span><span class="spaces">  </span><span class="istickedoff">do  op &lt;- many1 (satisfy Help.isSymbol) &lt;?&gt; <span class="nottickedoff">&quot;an infix operator like +&quot;</span></span>
+<span class="lineno">  124 </span><span class="spaces">      </span><span class="istickedoff">guard (op `notElem` [ &quot;=&quot;, &quot;..&quot;, &quot;-&gt;&quot;, &quot;--&quot;, &quot;|&quot;, &quot;\8594&quot;, &quot;:&quot; ])</span>
+<span class="lineno">  125 </span><span class="spaces">      </span><span class="istickedoff">case op of</span>
+<span class="lineno">  126 </span><span class="spaces">        </span><span class="istickedoff">&quot;.&quot; -&gt; notFollowedBy lower &gt;&gt; <span class="nottickedoff">return (SymbolIdentifier op)</span></span>
+<span class="lineno">  127 </span><span class="spaces">        </span><span class="istickedoff">_   -&gt; return $ SymbolIdentifier op</span></span>
+<span class="lineno">  128 </span>
+<span class="lineno">  129 </span>
+<span class="lineno">  130 </span>symOpInParens :: IParser SymbolIdentifier
+<span class="lineno">  131 </span><span class="decl"><span class="istickedoff">symOpInParens =</span>
+<span class="lineno">  132 </span><span class="spaces">    </span><span class="istickedoff">parens' symOp</span></span>
+<span class="lineno">  133 </span>
+<span class="lineno">  134 </span>
+<span class="lineno">  135 </span>-- COMMON SYMBOLS
+<span class="lineno">  136 </span>
+<span class="lineno">  137 </span>equals :: IParser ()
+<span class="lineno">  138 </span><span class="decl"><span class="istickedoff">equals =</span>
+<span class="lineno">  139 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; char '=' &lt;?&gt; <span class="nottickedoff">&quot;=&quot;</span></span></span>
+<span class="lineno">  140 </span>
+<span class="lineno">  141 </span>
+<span class="lineno">  142 </span>lenientEquals :: IParser ()
+<span class="lineno">  143 </span><span class="decl"><span class="istickedoff">lenientEquals =</span>
+<span class="lineno">  144 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; (char '=' &lt;|&gt; char ':') &lt;?&gt; <span class="nottickedoff">&quot;=&quot;</span></span></span>
+<span class="lineno">  145 </span>
+<span class="lineno">  146 </span>
+<span class="lineno">  147 </span>rightArrow :: IParser ()
+<span class="lineno">  148 </span><span class="decl"><span class="istickedoff">rightArrow =</span>
+<span class="lineno">  149 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; (string &quot;-&gt;&quot; &lt;|&gt; string &quot;\8594&quot;) &lt;?&gt; <span class="nottickedoff">&quot;-&gt;&quot;</span></span></span>
+<span class="lineno">  150 </span>
+<span class="lineno">  151 </span>
+<span class="lineno">  152 </span>cons :: IParser ()
+<span class="lineno">  153 </span><span class="decl"><span class="istickedoff">cons =</span>
+<span class="lineno">  154 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; string &quot;::&quot; &lt;?&gt; <span class="nottickedoff">&quot;a cons operator '::'&quot;</span></span></span>
+<span class="lineno">  155 </span>
+<span class="lineno">  156 </span>
+<span class="lineno">  157 </span>hasType :: IParser ()
+<span class="lineno">  158 </span><span class="decl"><span class="istickedoff">hasType =</span>
+<span class="lineno">  159 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; char ':' &lt;?&gt; <span class="nottickedoff">&quot;the \&quot;has type\&quot; symbol ':'&quot;</span></span></span>
+<span class="lineno">  160 </span>
+<span class="lineno">  161 </span>
+<span class="lineno">  162 </span>lenientHasType :: IParser ()
+<span class="lineno">  163 </span><span class="decl"><span class="istickedoff">lenientHasType =</span>
+<span class="lineno">  164 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; (char ':' &lt;|&gt; char '=') &lt;?&gt; <span class="nottickedoff">&quot;the \&quot;has type\&quot; symbol ':'&quot;</span></span></span>
+<span class="lineno">  165 </span>
+<span class="lineno">  166 </span>
+<span class="lineno">  167 </span>comma :: IParser ()
+<span class="lineno">  168 </span><span class="decl"><span class="istickedoff">comma =</span>
+<span class="lineno">  169 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; char ',' &lt;?&gt; <span class="nottickedoff">&quot;a comma ','&quot;</span></span></span>
+<span class="lineno">  170 </span>
+<span class="lineno">  171 </span>
+<span class="lineno">  172 </span>semicolon :: IParser ()
+<span class="lineno">  173 </span><span class="decl"><span class="nottickedoff">semicolon =</span>
+<span class="lineno">  174 </span><span class="spaces">  </span><span class="nottickedoff">const () &lt;$&gt; char ';' &lt;?&gt; &quot;a semicolon ';'&quot;</span></span>
+<span class="lineno">  175 </span>
+<span class="lineno">  176 </span>
+<span class="lineno">  177 </span>verticalBar :: IParser ()
+<span class="lineno">  178 </span><span class="decl"><span class="istickedoff">verticalBar =</span>
+<span class="lineno">  179 </span><span class="spaces">  </span><span class="istickedoff"><span class="nottickedoff">const ()</span> &lt;$&gt; char '|' &lt;?&gt; <span class="nottickedoff">&quot;a vertical bar '|'&quot;</span></span></span>
+<span class="lineno">  180 </span>
+<span class="lineno">  181 </span>
+<span class="lineno">  182 </span>commitIf :: IParser any -&gt; IParser a -&gt; IParser a
+<span class="lineno">  183 </span><span class="decl"><span class="istickedoff">commitIf check p =</span>
+<span class="lineno">  184 </span><span class="spaces">    </span><span class="istickedoff">commit &lt;|&gt; try p</span>
+<span class="lineno">  185 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  186 </span><span class="spaces">    </span><span class="istickedoff">commit =</span>
+<span class="lineno">  187 </span><span class="spaces">      </span><span class="istickedoff">try (lookAhead check) &gt;&gt; p</span></span>
+<span class="lineno">  188 </span>
+<span class="lineno">  189 </span>
+<span class="lineno">  190 </span>-- SEPARATORS
+<span class="lineno">  191 </span>
+<span class="lineno">  192 </span>
+<span class="lineno">  193 </span>spaceySepBy1 :: IParser sep -&gt; IParser a -&gt; IParser (ExposedCommentedList a)
+<span class="lineno">  194 </span><span class="decl"><span class="istickedoff">spaceySepBy1 sep parser =</span>
+<span class="lineno">  195 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  196 </span><span class="spaces">        </span><span class="istickedoff">-- step :: PostCommented (WithEol a) -&gt; [Commented (WithEol a)] -&gt; Comments -&gt; IParser (ExposedCommentedList a)</span>
+<span class="lineno">  197 </span><span class="spaces">        </span><span class="istickedoff">step first rest post =</span>
+<span class="lineno">  198 </span><span class="spaces">            </span><span class="istickedoff">do</span>
+<span class="lineno">  199 </span><span class="spaces">                </span><span class="istickedoff">(C eol next) &lt;- withEol parser</span>
+<span class="lineno">  200 </span><span class="spaces">                </span><span class="istickedoff">choice</span>
+<span class="lineno">  201 </span><span class="spaces">                    </span><span class="istickedoff">[ try (padded sep)</span>
+<span class="lineno">  202 </span><span class="spaces">                        </span><span class="istickedoff">&gt;&gt;= (\(C (preSep, postSep) _) -&gt; step first (C (post, preSep, eol) next : rest) postSep)</span>
+<span class="lineno">  203 </span><span class="spaces">                    </span><span class="istickedoff">, return $ Multiple first (reverse rest) (C (post, eol) next)</span>
+<span class="lineno">  204 </span><span class="spaces">                    </span><span class="istickedoff">]</span>
+<span class="lineno">  205 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  206 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  207 </span><span class="spaces">        </span><span class="istickedoff">do</span>
+<span class="lineno">  208 </span><span class="spaces">            </span><span class="istickedoff">(C eol value) &lt;- withEol parser</span>
+<span class="lineno">  209 </span><span class="spaces">            </span><span class="istickedoff">choice</span>
+<span class="lineno">  210 </span><span class="spaces">                </span><span class="istickedoff">[ try (padded sep)</span>
+<span class="lineno">  211 </span><span class="spaces">                    </span><span class="istickedoff">&gt;&gt;= (\(C (preSep, postSep) _) -&gt; step (C (preSep, eol) value) [] postSep)</span>
+<span class="lineno">  212 </span><span class="spaces">                </span><span class="istickedoff">, return $ Single (C eol value)</span>
+<span class="lineno">  213 </span><span class="spaces">                </span><span class="istickedoff">]</span></span>
+<span class="lineno">  214 </span>
+<span class="lineno">  215 </span>
+<span class="lineno">  216 </span>-- DEPRECATED: use spaceySepBy1 instead
+<span class="lineno">  217 </span>spaceySepBy1'' :: IParser sep -&gt; IParser (Comments -&gt; Comments -&gt; a) -&gt; IParser (Comments -&gt; Comments -&gt; [a])
+<span class="lineno">  218 </span><span class="decl"><span class="istickedoff">spaceySepBy1'' sep parser =</span>
+<span class="lineno">  219 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">  220 </span><span class="spaces">    </span><span class="istickedoff">combine eol post =</span>
+<span class="lineno">  221 </span><span class="spaces">      </span><span class="istickedoff">eolToComment eol ++ post</span>
+<span class="lineno">  222 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">  223 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">  224 </span><span class="spaces">        </span><span class="istickedoff">result &lt;- spaceySepBy1 sep parser</span>
+<span class="lineno">  225 </span><span class="spaces">        </span><span class="istickedoff">case result of</span>
+<span class="lineno">  226 </span><span class="spaces">            </span><span class="istickedoff">Single (C eol item) -&gt;</span>
+<span class="lineno">  227 </span><span class="spaces">                </span><span class="istickedoff">return $ \pre post -&gt; [item pre (combine eol post)]</span>
+<span class="lineno">  228 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  229 </span><span class="spaces">            </span><span class="istickedoff">Multiple (C (postFirst, firstEol) first ) rest (C (preLast, eol) last) -&gt;</span>
+<span class="lineno">  230 </span><span class="spaces">                </span><span class="istickedoff">return $ \preFirst postLast -&gt;</span>
+<span class="lineno">  231 </span><span class="spaces">                    </span><span class="istickedoff">concat</span>
+<span class="lineno">  232 </span><span class="spaces">                        </span><span class="istickedoff">[ [first preFirst $ combine firstEol postFirst]</span>
+<span class="lineno">  233 </span><span class="spaces">                        </span><span class="istickedoff">, fmap (\(C (pre, post, eol) item) -&gt; item pre $ combine eol post) rest</span>
+<span class="lineno">  234 </span><span class="spaces">                        </span><span class="istickedoff">, [last preLast $ combine eol postLast ]</span>
+<span class="lineno">  235 </span><span class="spaces">                        </span><span class="istickedoff">]</span></span>
+<span class="lineno">  236 </span>
+<span class="lineno">  237 </span>
+<span class="lineno">  238 </span>-- DEPRECATED: use spaceySepBy1 instead
+<span class="lineno">  239 </span>spaceySepBy1' :: IParser sep -&gt; IParser a -&gt; IParser (Comments -&gt; Comments -&gt; [C2 before after a])
+<span class="lineno">  240 </span><span class="decl"><span class="istickedoff">spaceySepBy1' sep parser =</span>
+<span class="lineno">  241 </span><span class="spaces">    </span><span class="istickedoff">spaceySepBy1'' sep ((\x pre post -&gt; C (pre, post) x) &lt;$&gt; parser)</span></span>
+<span class="lineno">  242 </span>
+<span class="lineno">  243 </span>
+<span class="lineno">  244 </span>commaSep1 :: IParser (Comments -&gt; Comments -&gt; a) -&gt; IParser (Comments -&gt; Comments -&gt; [a])
+<span class="lineno">  245 </span><span class="decl"><span class="istickedoff">commaSep1 =</span>
+<span class="lineno">  246 </span><span class="spaces">  </span><span class="istickedoff">spaceySepBy1'' comma</span></span>
+<span class="lineno">  247 </span>
+<span class="lineno">  248 </span>
+<span class="lineno">  249 </span>commaSep1' :: IParser a -&gt; IParser (Comments -&gt; Comments -&gt; [C2 before after a])
+<span class="lineno">  250 </span><span class="decl"><span class="istickedoff">commaSep1' =</span>
+<span class="lineno">  251 </span><span class="spaces">  </span><span class="istickedoff">spaceySepBy1' comma</span></span>
+<span class="lineno">  252 </span>
+<span class="lineno">  253 </span>
+<span class="lineno">  254 </span>toSet :: Ord k =&gt; (v -&gt; v -&gt; v) -&gt; [C2 before after (k, v)] -&gt; Map k (C2 before after v)
+<span class="lineno">  255 </span><span class="decl"><span class="istickedoff">toSet merge values =</span>
+<span class="lineno">  256 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  257 </span><span class="spaces">        </span><span class="istickedoff">merge' (C (pre1, post1) a) (C (pre2, post2) b) =</span>
+<span class="lineno">  258 </span><span class="spaces">            </span><span class="istickedoff">C (pre1 ++ pre2, post1 ++ post2) (merge a b)</span>
+<span class="lineno">  259 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  260 </span><span class="spaces">    </span><span class="istickedoff">foldl (\m (C (pre, post) (k, v)) -&gt; insertWith merge' k (C (pre, post) v) m) empty values</span></span>
+<span class="lineno">  261 </span>
+<span class="lineno">  262 </span>
+<span class="lineno">  263 </span>commaSep1Set' :: Ord k =&gt; IParser (k, v) -&gt; (v -&gt; v -&gt; v) -&gt; IParser (Comments -&gt; Comments -&gt; Map k (C2 before after v))
+<span class="lineno">  264 </span><span class="decl"><span class="istickedoff">commaSep1Set' parser merge =</span>
+<span class="lineno">  265 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">  266 </span><span class="spaces">        </span><span class="istickedoff">values &lt;- commaSep1' parser</span>
+<span class="lineno">  267 </span><span class="spaces">        </span><span class="istickedoff">return $ \pre post -&gt; toSet merge $ values pre post</span></span>
+<span class="lineno">  268 </span>
+<span class="lineno">  269 </span>
+<span class="lineno">  270 </span>commaSep :: IParser (Comments -&gt; Comments -&gt; a) -&gt; IParser (Maybe (Comments -&gt; Comments -&gt; [a]))
+<span class="lineno">  271 </span><span class="decl"><span class="nottickedoff">commaSep term =</span>
+<span class="lineno">  272 </span><span class="spaces">    </span><span class="nottickedoff">option Nothing (Just &lt;$&gt; commaSep1 term)</span></span>
+<span class="lineno">  273 </span>
+<span class="lineno">  274 </span>
+<span class="lineno">  275 </span>pipeSep1 :: IParser a -&gt; IParser (ExposedCommentedList a)
+<span class="lineno">  276 </span><span class="decl"><span class="istickedoff">pipeSep1 =</span>
+<span class="lineno">  277 </span><span class="spaces">  </span><span class="istickedoff">spaceySepBy1 verticalBar</span></span>
+<span class="lineno">  278 </span>
+<span class="lineno">  279 </span>
+<span class="lineno">  280 </span>keyValue :: IParser sep -&gt; IParser key -&gt; IParser val -&gt; IParser (Comments -&gt; Comments -&gt; (C2 before after key, C2 before' after' val) )
+<span class="lineno">  281 </span><span class="decl"><span class="istickedoff">keyValue parseSep parseKey parseVal =</span>
+<span class="lineno">  282 </span><span class="spaces">  </span><span class="istickedoff">do</span>
+<span class="lineno">  283 </span><span class="spaces">    </span><span class="istickedoff">key &lt;- parseKey</span>
+<span class="lineno">  284 </span><span class="spaces">    </span><span class="istickedoff">preSep &lt;- whitespace &lt;* parseSep</span>
+<span class="lineno">  285 </span><span class="spaces">    </span><span class="istickedoff">postSep &lt;- whitespace</span>
+<span class="lineno">  286 </span><span class="spaces">    </span><span class="istickedoff">val &lt;- parseVal</span>
+<span class="lineno">  287 </span><span class="spaces">    </span><span class="istickedoff">return $ \pre post -&gt;</span>
+<span class="lineno">  288 </span><span class="spaces">      </span><span class="istickedoff">( C (pre, preSep) key</span>
+<span class="lineno">  289 </span><span class="spaces">      </span><span class="istickedoff">, C (postSep, post) val</span>
+<span class="lineno">  290 </span><span class="spaces">      </span><span class="istickedoff">)</span></span>
+<span class="lineno">  291 </span>
+<span class="lineno">  292 </span>
+<span class="lineno">  293 </span>separated :: IParser sep -&gt; IParser e -&gt; IParser (Either e (R.Region, C0Eol e, Sequence e, Bool))
+<span class="lineno">  294 </span><span class="decl"><span class="istickedoff">separated sep expr' =</span>
+<span class="lineno">  295 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">  296 </span><span class="spaces">    </span><span class="istickedoff">subparser =</span>
+<span class="lineno">  297 </span><span class="spaces">      </span><span class="istickedoff">do  start &lt;- getMyPosition</span>
+<span class="lineno">  298 </span><span class="spaces">          </span><span class="istickedoff">t1 &lt;- expr'</span>
+<span class="lineno">  299 </span><span class="spaces">          </span><span class="istickedoff">arrow &lt;- optionMaybe $ try ((,) &lt;$&gt; restOfLine &lt;*&gt; whitespace &lt;* sep)</span>
+<span class="lineno">  300 </span><span class="spaces">          </span><span class="istickedoff">case arrow of</span>
+<span class="lineno">  301 </span><span class="spaces">            </span><span class="istickedoff">Nothing -&gt;</span>
+<span class="lineno">  302 </span><span class="spaces">                </span><span class="istickedoff">return $ \_multiline -&gt; Left t1</span>
+<span class="lineno">  303 </span><span class="spaces">            </span><span class="istickedoff">Just (eolT1, preArrow) -&gt;</span>
+<span class="lineno">  304 </span><span class="spaces">                </span><span class="istickedoff">do  postArrow &lt;- whitespace</span>
+<span class="lineno">  305 </span><span class="spaces">                    </span><span class="istickedoff">t2 &lt;- separated sep expr'</span>
+<span class="lineno">  306 </span><span class="spaces">                    </span><span class="istickedoff">end &lt;- getMyPosition</span>
+<span class="lineno">  307 </span><span class="spaces">                    </span><span class="istickedoff">case t2 of</span>
+<span class="lineno">  308 </span><span class="spaces">                        </span><span class="istickedoff">Right (_, C eolT2 t2', Sequence ts, _) -&gt;</span>
+<span class="lineno">  309 </span><span class="spaces">                          </span><span class="istickedoff">return $ \multiline -&gt; Right</span>
+<span class="lineno">  310 </span><span class="spaces">                            </span><span class="istickedoff">( R.Region start end</span>
+<span class="lineno">  311 </span><span class="spaces">                            </span><span class="istickedoff">, C eolT1 t1</span>
+<span class="lineno">  312 </span><span class="spaces">                            </span><span class="istickedoff">, Sequence (C (preArrow, postArrow, eolT2) t2' : ts)</span>
+<span class="lineno">  313 </span><span class="spaces">                            </span><span class="istickedoff">, multiline</span>
+<span class="lineno">  314 </span><span class="spaces">                            </span><span class="istickedoff">)</span>
+<span class="lineno">  315 </span><span class="spaces">                        </span><span class="istickedoff">Left t2' -&gt;</span>
+<span class="lineno">  316 </span><span class="spaces">                          </span><span class="istickedoff">do</span>
+<span class="lineno">  317 </span><span class="spaces">                            </span><span class="istickedoff">eol &lt;- restOfLine</span>
+<span class="lineno">  318 </span><span class="spaces">                            </span><span class="istickedoff">return $ \multiline -&gt; Right</span>
+<span class="lineno">  319 </span><span class="spaces">                              </span><span class="istickedoff">( R.Region start end</span>
+<span class="lineno">  320 </span><span class="spaces">                              </span><span class="istickedoff">, C eolT1 t1</span>
+<span class="lineno">  321 </span><span class="spaces">                              </span><span class="istickedoff">, Sequence [ C (preArrow, postArrow, eol) t2' ]</span>
+<span class="lineno">  322 </span><span class="spaces">                              </span><span class="istickedoff">, multiline)</span>
+<span class="lineno">  323 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">  324 </span><span class="spaces">    </span><span class="istickedoff">(\(f, multiline) -&gt; f $ multilineToBool multiline) &lt;$&gt; trackNewline subparser</span></span>
+<span class="lineno">  325 </span>
+<span class="lineno">  326 </span>
+<span class="lineno">  327 </span>dotSep1 :: IParser a -&gt; IParser [a]
+<span class="lineno">  328 </span><span class="decl"><span class="istickedoff">dotSep1 p =</span>
+<span class="lineno">  329 </span><span class="spaces">  </span><span class="istickedoff">(:) &lt;$&gt; p &lt;*&gt; many (try (char '.') &gt;&gt; p)</span></span>
+<span class="lineno">  330 </span>
+<span class="lineno">  331 </span>
+<span class="lineno">  332 </span>spacePrefix :: IParser a -&gt; IParser [C1 before a]
+<span class="lineno">  333 </span><span class="decl"><span class="istickedoff">spacePrefix p =</span>
+<span class="lineno">  334 </span><span class="spaces">  </span><span class="istickedoff">fmap fst &lt;$&gt;</span>
+<span class="lineno">  335 </span><span class="spaces">      </span><span class="istickedoff">constrainedSpacePrefix' p (\_ -&gt; return <span class="nottickedoff">()</span>)</span></span>
+<span class="lineno">  336 </span>
+<span class="lineno">  337 </span>
+<span class="lineno">  338 </span>constrainedSpacePrefix :: IParser a -&gt; IParser [(C1 before a, Multiline)]
+<span class="lineno">  339 </span><span class="decl"><span class="istickedoff">constrainedSpacePrefix parser =</span>
+<span class="lineno">  340 </span><span class="spaces">  </span><span class="istickedoff">constrainedSpacePrefix' parser constraint</span>
+<span class="lineno">  341 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  342 </span><span class="spaces">    </span><span class="istickedoff">constraint empty = if empty then notFollowedBy (char '-') else return <span class="nottickedoff">()</span></span></span>
+<span class="lineno">  343 </span>
+<span class="lineno">  344 </span>
+<span class="lineno">  345 </span>constrainedSpacePrefix' :: IParser a -&gt; (Bool -&gt; IParser b) -&gt; IParser [(C1 before a, Multiline)]
+<span class="lineno">  346 </span><span class="decl"><span class="istickedoff">constrainedSpacePrefix' parser constraint =</span>
+<span class="lineno">  347 </span><span class="spaces">    </span><span class="istickedoff">many $ trackNewline $ choice</span>
+<span class="lineno">  348 </span><span class="spaces">      </span><span class="istickedoff">[ C &lt;$&gt; try (const &lt;$&gt; spacing &lt;*&gt; lookAhead (oneOf &quot;[({&quot;)) &lt;*&gt; parser</span>
+<span class="lineno">  349 </span><span class="spaces">      </span><span class="istickedoff">, try (C &lt;$&gt; spacing &lt;*&gt; parser)</span>
+<span class="lineno">  350 </span><span class="spaces">      </span><span class="istickedoff">]</span>
+<span class="lineno">  351 </span><span class="spaces">    </span><span class="istickedoff">where</span>
+<span class="lineno">  352 </span><span class="spaces">      </span><span class="istickedoff">spacing = do</span>
+<span class="lineno">  353 </span><span class="spaces">        </span><span class="istickedoff">(n, comments) &lt;- whitespace'</span>
+<span class="lineno">  354 </span><span class="spaces">        </span><span class="istickedoff">_ &lt;- constraint (not n) &lt;?&gt; <span class="nottickedoff">Syntax.whitespace</span></span>
+<span class="lineno">  355 </span><span class="spaces">        </span><span class="istickedoff">indented</span>
+<span class="lineno">  356 </span><span class="spaces">        </span><span class="istickedoff">return comments</span></span>
+<span class="lineno">  357 </span>
+<span class="lineno">  358 </span>
+<span class="lineno">  359 </span>-- SURROUNDED BY
+<span class="lineno">  360 </span>
+<span class="lineno">  361 </span>betwixt :: Char -&gt; Char -&gt; IParser a -&gt; IParser a
+<span class="lineno">  362 </span><span class="decl"><span class="istickedoff">betwixt a b c =</span>
+<span class="lineno">  363 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- char a</span>
+<span class="lineno">  364 </span><span class="spaces">      </span><span class="istickedoff">out &lt;- c</span>
+<span class="lineno">  365 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- char b &lt;?&gt; <span class="nottickedoff">&quot;a closing '&quot; ++ [b] ++ &quot;'&quot;</span></span>
+<span class="lineno">  366 </span><span class="spaces">      </span><span class="istickedoff">return out</span></span>
+<span class="lineno">  367 </span>
+<span class="lineno">  368 </span>
+<span class="lineno">  369 </span>surround :: Char -&gt; Char -&gt; String -&gt; IParser (Comments -&gt; Comments -&gt; Bool -&gt; a) -&gt; IParser a
+<span class="lineno">  370 </span><span class="decl"><span class="istickedoff">surround a z name p =</span>
+<span class="lineno">  371 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">  372 </span><span class="spaces">    </span><span class="istickedoff">-- subparser :: IParser (Bool -&gt; a)</span>
+<span class="lineno">  373 </span><span class="spaces">    </span><span class="istickedoff">subparser = do</span>
+<span class="lineno">  374 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- char a</span>
+<span class="lineno">  375 </span><span class="spaces">      </span><span class="istickedoff">(C (pre, post) v) &lt;- padded p</span>
+<span class="lineno">  376 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- char z &lt;?&gt; <span class="nottickedoff">unwords [&quot;a closing&quot;, name, show z]</span></span>
+<span class="lineno">  377 </span><span class="spaces">      </span><span class="istickedoff">return $ \multiline -&gt; v pre post multiline</span>
+<span class="lineno">  378 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  379 </span><span class="spaces">      </span><span class="istickedoff">(\(f, multiline) -&gt; f (multilineToBool multiline)) &lt;$&gt; trackNewline subparser</span></span>
+<span class="lineno">  380 </span>
+<span class="lineno">  381 </span>
+<span class="lineno">  382 </span>-- TODO: push the Multiline type further up in the AST and get rid of this
+<span class="lineno">  383 </span>multilineToBool :: Multiline -&gt; Bool
+<span class="lineno">  384 </span><span class="decl"><span class="istickedoff">multilineToBool multine =</span>
+<span class="lineno">  385 </span><span class="spaces">  </span><span class="istickedoff">case multine of</span>
+<span class="lineno">  386 </span><span class="spaces">    </span><span class="istickedoff">SplitAll -&gt; True</span>
+<span class="lineno">  387 </span><span class="spaces">    </span><span class="istickedoff">JoinAll -&gt; False</span></span>
+<span class="lineno">  388 </span>
+<span class="lineno">  389 </span>
+<span class="lineno">  390 </span>braces :: IParser (Comments -&gt; Comments -&gt; Bool -&gt; a) -&gt; IParser a
+<span class="lineno">  391 </span><span class="decl"><span class="istickedoff">braces =</span>
+<span class="lineno">  392 </span><span class="spaces">  </span><span class="istickedoff">surround '[' ']' <span class="nottickedoff">&quot;brace&quot;</span></span></span>
+<span class="lineno">  393 </span>
+<span class="lineno">  394 </span>
+<span class="lineno">  395 </span>parens :: IParser (Comments -&gt; Comments -&gt; Bool -&gt; a) -&gt; IParser a
+<span class="lineno">  396 </span><span class="decl"><span class="istickedoff">parens =</span>
+<span class="lineno">  397 </span><span class="spaces">  </span><span class="istickedoff">surround '(' ')' <span class="nottickedoff">&quot;paren&quot;</span></span></span>
+<span class="lineno">  398 </span>
+<span class="lineno">  399 </span>
+<span class="lineno">  400 </span>brackets :: IParser (Comments -&gt; Comments -&gt; Bool -&gt; a) -&gt; IParser a
+<span class="lineno">  401 </span><span class="decl"><span class="istickedoff">brackets =</span>
+<span class="lineno">  402 </span><span class="spaces">  </span><span class="istickedoff">surround '{' '}' <span class="nottickedoff">&quot;bracket&quot;</span></span></span>
+<span class="lineno">  403 </span>
+<span class="lineno">  404 </span>
+<span class="lineno">  405 </span>braces' :: IParser a -&gt; IParser a
+<span class="lineno">  406 </span><span class="decl"><span class="istickedoff">braces' =</span>
+<span class="lineno">  407 </span><span class="spaces">    </span><span class="istickedoff">surround' '[' ']' <span class="nottickedoff">&quot;brace&quot;</span></span></span>
+<span class="lineno">  408 </span>
+<span class="lineno">  409 </span>
+<span class="lineno">  410 </span>brackets' :: IParser a -&gt; IParser a
+<span class="lineno">  411 </span><span class="decl"><span class="istickedoff">brackets' =</span>
+<span class="lineno">  412 </span><span class="spaces">    </span><span class="istickedoff">surround' '{' '}' <span class="nottickedoff">&quot;bracket&quot;</span></span></span>
+<span class="lineno">  413 </span>
+<span class="lineno">  414 </span>
+<span class="lineno">  415 </span>surround' :: Char -&gt; Char -&gt; String -&gt; IParser a -&gt; IParser a
+<span class="lineno">  416 </span><span class="decl"><span class="istickedoff">surround' a z name p = do</span>
+<span class="lineno">  417 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char a</span>
+<span class="lineno">  418 </span><span class="spaces">  </span><span class="istickedoff">v &lt;- p</span>
+<span class="lineno">  419 </span><span class="spaces">  </span><span class="istickedoff">_ &lt;- char z &lt;?&gt; <span class="nottickedoff">unwords [&quot;a closing&quot;, name, show z]</span></span>
+<span class="lineno">  420 </span><span class="spaces">  </span><span class="istickedoff">return v</span></span>
+<span class="lineno">  421 </span>
+<span class="lineno">  422 </span>
+<span class="lineno">  423 </span>parens' :: IParser a -&gt; IParser a
+<span class="lineno">  424 </span><span class="decl"><span class="istickedoff">parens' =</span>
+<span class="lineno">  425 </span><span class="spaces">  </span><span class="istickedoff">surround' '(' ')' <span class="nottickedoff">&quot;paren&quot;</span></span></span>
+<span class="lineno">  426 </span>
+<span class="lineno">  427 </span>
+<span class="lineno">  428 </span>parens'' :: IParser a -&gt; IParser (Either Comments [C2 before after a])
+<span class="lineno">  429 </span><span class="decl"><span class="istickedoff">parens'' = surround'' '(' ')'</span></span>
+<span class="lineno">  430 </span>
+<span class="lineno">  431 </span>
+<span class="lineno">  432 </span>braces'' :: IParser a -&gt; IParser (Either Comments [C2 before after a])
+<span class="lineno">  433 </span><span class="decl"><span class="istickedoff">braces'' = surround'' '[' ']'</span></span>
+<span class="lineno">  434 </span>
+<span class="lineno">  435 </span>
+<span class="lineno">  436 </span>surround'' :: Char -&gt; Char -&gt; IParser a -&gt; IParser (Either Comments [C2 before after a])
+<span class="lineno">  437 </span><span class="decl"><span class="istickedoff">surround'' leftDelim rightDelim inner =</span>
+<span class="lineno">  438 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">  439 </span><span class="spaces">    </span><span class="istickedoff">sep''' =</span>
+<span class="lineno">  440 </span><span class="spaces">      </span><span class="istickedoff">do</span>
+<span class="lineno">  441 </span><span class="spaces">        </span><span class="istickedoff">v &lt;- (\pre a post -&gt; C (pre, post) a) &lt;$&gt; whitespace &lt;*&gt; inner &lt;*&gt; whitespace</span>
+<span class="lineno">  442 </span><span class="spaces">        </span><span class="istickedoff">option [v] ((\x -&gt; v : x) &lt;$&gt; (char ',' &gt;&gt; sep'''))</span>
+<span class="lineno">  443 </span><span class="spaces">    </span><span class="istickedoff">sep'' =</span>
+<span class="lineno">  444 </span><span class="spaces">      </span><span class="istickedoff">do</span>
+<span class="lineno">  445 </span><span class="spaces">          </span><span class="istickedoff">pre &lt;- whitespace</span>
+<span class="lineno">  446 </span><span class="spaces">          </span><span class="istickedoff">v &lt;- optionMaybe ((\a post -&gt; C (pre, post) a) &lt;$&gt; inner &lt;*&gt; whitespace)</span>
+<span class="lineno">  447 </span><span class="spaces">          </span><span class="istickedoff">case v of</span>
+<span class="lineno">  448 </span><span class="spaces">              </span><span class="istickedoff">Nothing -&gt;</span>
+<span class="lineno">  449 </span><span class="spaces">                  </span><span class="istickedoff">return $ Left pre</span>
+<span class="lineno">  450 </span><span class="spaces">              </span><span class="istickedoff">Just v' -&gt;</span>
+<span class="lineno">  451 </span><span class="spaces">                  </span><span class="istickedoff">Right &lt;$&gt; option [v'] ((\x -&gt; v' : x) &lt;$&gt; (char ',' &gt;&gt; sep'''))</span>
+<span class="lineno">  452 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">  453 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">  454 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- char leftDelim</span>
+<span class="lineno">  455 </span><span class="spaces">      </span><span class="istickedoff">vs &lt;- sep''</span>
+<span class="lineno">  456 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- char rightDelim</span>
+<span class="lineno">  457 </span><span class="spaces">      </span><span class="istickedoff">return vs</span></span>
+<span class="lineno">  458 </span>
+<span class="lineno">  459 </span>
+<span class="lineno">  460 </span>-- HELPERS FOR EXPRESSIONS
+<span class="lineno">  461 </span>
+<span class="lineno">  462 </span>getMyPosition :: IParser R.Position
+<span class="lineno">  463 </span><span class="decl"><span class="istickedoff">getMyPosition =</span>
+<span class="lineno">  464 </span><span class="spaces">  </span><span class="istickedoff">R.fromSourcePos &lt;$&gt; getPosition</span></span>
+<span class="lineno">  465 </span>
+<span class="lineno">  466 </span>
+<span class="lineno">  467 </span>addLocation :: IParser a -&gt; IParser (A.Located a)
+<span class="lineno">  468 </span><span class="decl"><span class="istickedoff">addLocation expr =</span>
+<span class="lineno">  469 </span><span class="spaces">  </span><span class="istickedoff">do  (start, e, end) &lt;- located expr</span>
+<span class="lineno">  470 </span><span class="spaces">      </span><span class="istickedoff">return (A.at start end e)</span></span>
+<span class="lineno">  471 </span>
+<span class="lineno">  472 </span>
+<span class="lineno">  473 </span>located :: IParser a -&gt; IParser (R.Position, a, R.Position)
+<span class="lineno">  474 </span><span class="decl"><span class="istickedoff">located parser =</span>
+<span class="lineno">  475 </span><span class="spaces">  </span><span class="istickedoff">do  start &lt;- getMyPosition</span>
+<span class="lineno">  476 </span><span class="spaces">      </span><span class="istickedoff">value &lt;- parser</span>
+<span class="lineno">  477 </span><span class="spaces">      </span><span class="istickedoff">end &lt;- getMyPosition</span>
+<span class="lineno">  478 </span><span class="spaces">      </span><span class="istickedoff">return (start, value, end)</span></span>
+<span class="lineno">  479 </span>
+<span class="lineno">  480 </span>
+<span class="lineno">  481 </span>accessible :: ElmVersion -&gt; IParser (FixAST A.Located typeRef ctorRef varRef 'ExpressionNK) -&gt; IParser (FixAST A.Located typeRef ctorRef varRef 'ExpressionNK)
+<span class="lineno">  482 </span><span class="decl"><span class="istickedoff">accessible elmVersion exprParser =</span>
+<span class="lineno">  483 </span><span class="spaces">  </span><span class="istickedoff">do  start &lt;- getMyPosition</span>
+<span class="lineno">  484 </span><span class="spaces">      </span><span class="istickedoff">rootExpr &lt;- exprParser</span>
+<span class="lineno">  485 </span><span class="spaces">      </span><span class="istickedoff">access &lt;- optionMaybe (try dot &lt;?&gt; <span class="nottickedoff">&quot;a field access like .name&quot;</span>)</span>
+<span class="lineno">  486 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  487 </span><span class="spaces">      </span><span class="istickedoff">case access of</span>
+<span class="lineno">  488 </span><span class="spaces">        </span><span class="istickedoff">Nothing -&gt;</span>
+<span class="lineno">  489 </span><span class="spaces">          </span><span class="istickedoff">return rootExpr</span>
+<span class="lineno">  490 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  491 </span><span class="spaces">        </span><span class="istickedoff">Just _ -&gt;</span>
+<span class="lineno">  492 </span><span class="spaces">          </span><span class="istickedoff">accessible elmVersion $</span>
+<span class="lineno">  493 </span><span class="spaces">            </span><span class="istickedoff">do  v &lt;- lowVar elmVersion</span>
+<span class="lineno">  494 </span><span class="spaces">                </span><span class="istickedoff">end &lt;- getMyPosition</span>
+<span class="lineno">  495 </span><span class="spaces">                </span><span class="istickedoff">return $ I.Fix $ A.at start end $ Access rootExpr v</span></span>
+<span class="lineno">  496 </span>
+<span class="lineno">  497 </span>
+<span class="lineno">  498 </span>dot :: IParser ()
+<span class="lineno">  499 </span><span class="decl"><span class="istickedoff">dot =</span>
+<span class="lineno">  500 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- char '.'</span>
+<span class="lineno">  501 </span><span class="spaces">      </span><span class="istickedoff">notFollowedBy (char '.')</span></span>
+<span class="lineno">  502 </span>
+<span class="lineno">  503 </span>
+<span class="lineno">  504 </span>commentedKeyword :: ElmVersion -&gt; String -&gt; IParser a -&gt; IParser (C2 beforeKeyword afterKeyword a)
+<span class="lineno">  505 </span><span class="decl"><span class="istickedoff">commentedKeyword elmVersion word parser =</span>
+<span class="lineno">  506 </span><span class="spaces">  </span><span class="istickedoff">do</span>
+<span class="lineno">  507 </span><span class="spaces">    </span><span class="istickedoff">pre &lt;- try (whitespace &lt;* reserved elmVersion word)</span>
+<span class="lineno">  508 </span><span class="spaces">    </span><span class="istickedoff">post &lt;- whitespace</span>
+<span class="lineno">  509 </span><span class="spaces">    </span><span class="istickedoff">value &lt;- parser</span>
+<span class="lineno">  510 </span><span class="spaces">    </span><span class="istickedoff">return $ C (pre, post) value</span></span>
+<span class="lineno">  511 </span>
+<span class="lineno">  512 </span>
+<span class="lineno">  513 </span>-- ODD COMBINATORS
+<span class="lineno">  514 </span>
+<span class="lineno">  515 </span>failure :: String -&gt; IParser String
+<span class="lineno">  516 </span><span class="decl"><span class="nottickedoff">failure msg = do</span>
+<span class="lineno">  517 </span><span class="spaces">  </span><span class="nottickedoff">inp &lt;- getInput</span>
+<span class="lineno">  518 </span><span class="spaces">  </span><span class="nottickedoff">setInput ('x':inp)</span>
+<span class="lineno">  519 </span><span class="spaces">  </span><span class="nottickedoff">_ &lt;- anyToken</span>
+<span class="lineno">  520 </span><span class="spaces">  </span><span class="nottickedoff">fail msg</span></span>
+<span class="lineno">  521 </span>
+<span class="lineno">  522 </span>
+<span class="lineno">  523 </span>until :: IParser a -&gt; IParser b -&gt; IParser b
+<span class="lineno">  524 </span><span class="decl"><span class="nottickedoff">until p end =</span>
+<span class="lineno">  525 </span><span class="spaces">    </span><span class="nottickedoff">go</span>
+<span class="lineno">  526 </span><span class="spaces">  </span><span class="nottickedoff">where</span>
+<span class="lineno">  527 </span><span class="spaces">    </span><span class="nottickedoff">go = end &lt;|&gt; (p &gt;&gt; go)</span></span>
+<span class="lineno">  528 </span>
+<span class="lineno">  529 </span>
+<span class="lineno">  530 </span>-- BASIC LANGUAGE LITERALS
+<span class="lineno">  531 </span>
+<span class="lineno">  532 </span>shader :: IParser String
+<span class="lineno">  533 </span><span class="decl"><span class="istickedoff">shader =</span>
+<span class="lineno">  534 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- try (string &quot;[glsl|&quot;)</span>
+<span class="lineno">  535 </span><span class="spaces">      </span><span class="istickedoff">closeShader id</span></span>
+<span class="lineno">  536 </span>
+<span class="lineno">  537 </span>
+<span class="lineno">  538 </span>closeShader :: (String -&gt; a) -&gt; IParser a
+<span class="lineno">  539 </span><span class="decl"><span class="istickedoff">closeShader builder =</span>
+<span class="lineno">  540 </span><span class="spaces">  </span><span class="istickedoff">choice</span>
+<span class="lineno">  541 </span><span class="spaces">    </span><span class="istickedoff">[ do  _ &lt;- try (string &quot;|]&quot;)</span>
+<span class="lineno">  542 </span><span class="spaces">          </span><span class="istickedoff">return (builder &quot;&quot;)</span>
+<span class="lineno">  543 </span><span class="spaces">    </span><span class="istickedoff">, do  c &lt;- anyChar</span>
+<span class="lineno">  544 </span><span class="spaces">          </span><span class="istickedoff">closeShader (builder . (c:))</span>
+<span class="lineno">  545 </span><span class="spaces">    </span><span class="istickedoff">]</span></span>
+<span class="lineno">  546 </span>
+<span class="lineno">  547 </span>
+<span class="lineno">  548 </span>sandwich :: Char -&gt; String -&gt; String
+<span class="lineno">  549 </span><span class="decl"><span class="istickedoff">sandwich delim s =</span>
+<span class="lineno">  550 </span><span class="spaces">  </span><span class="istickedoff">delim : s ++ [delim]</span></span>
+<span class="lineno">  551 </span>
+<span class="lineno">  552 </span>
+<span class="lineno">  553 </span>escaped :: Char -&gt; IParser String
+<span class="lineno">  554 </span><span class="decl"><span class="istickedoff">escaped delim =</span>
+<span class="lineno">  555 </span><span class="spaces">  </span><span class="istickedoff">try $ do</span>
+<span class="lineno">  556 </span><span class="spaces">    </span><span class="istickedoff">_ &lt;- char '\\'</span>
+<span class="lineno">  557 </span><span class="spaces">    </span><span class="istickedoff">c &lt;- char '\\' &lt;|&gt; char delim</span>
+<span class="lineno">  558 </span><span class="spaces">    </span><span class="istickedoff">return ['\\', c]</span></span>
+<span class="lineno">  559 </span>
+<span class="lineno">  560 </span>
+<span class="lineno">  561 </span>processAs :: IParser a -&gt; String -&gt; IParser a
+<span class="lineno">  562 </span><span class="decl"><span class="istickedoff">processAs processor s =</span>
+<span class="lineno">  563 </span><span class="spaces">    </span><span class="istickedoff">calloutParser s processor</span>
+<span class="lineno">  564 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  565 </span><span class="spaces">    </span><span class="istickedoff">calloutParser :: String -&gt; IParser a -&gt; IParser a</span>
+<span class="lineno">  566 </span><span class="spaces">    </span><span class="istickedoff">calloutParser inp p =</span>
+<span class="lineno">  567 </span><span class="spaces">      </span><span class="istickedoff">either <span class="nottickedoff">(fail . show)</span> return (iParse p inp)</span></span>
+
+</pre>
+</body>
+</html>

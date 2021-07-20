@@ -1,0 +1,69 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    2 </span>module AST.Listing where
+<span class="lineno">    3 </span>
+<span class="lineno">    4 </span>import AST.V0_16
+<span class="lineno">    5 </span>import Data.Map.Strict
+<span class="lineno">    6 </span>
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>-- | A listing of values. Something like (a,b,c) or (..) or (a,b,..)
+<span class="lineno">    9 </span>data Listing a
+<span class="lineno">   10 </span>    = ExplicitListing a Bool
+<span class="lineno">   11 </span>    | OpenListing (C2 'BeforeTerm 'AfterTerm ())
+<span class="lineno">   12 </span>    | ClosedListing
+<span class="lineno">   13 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Ord</span></span></span></span></span></span></span></span></span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>) -- TODO: is Ord needed?
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>mergeListing :: (a -&gt; a -&gt; a) -&gt; Listing a -&gt; Listing a -&gt; Listing a
+<span class="lineno">   16 </span><span class="decl"><span class="istickedoff">mergeListing merge left right =</span>
+<span class="lineno">   17 </span><span class="spaces">    </span><span class="istickedoff">case (left, right) of</span>
+<span class="lineno">   18 </span><span class="spaces">        </span><span class="istickedoff">(ClosedListing, ClosedListing) -&gt; ClosedListing</span>
+<span class="lineno">   19 </span><span class="spaces">        </span><span class="istickedoff">(ClosedListing, OpenListing comments) -&gt; <span class="nottickedoff">OpenListing comments</span></span>
+<span class="lineno">   20 </span><span class="spaces">        </span><span class="istickedoff">(OpenListing comments, ClosedListing) -&gt; OpenListing comments</span>
+<span class="lineno">   21 </span><span class="spaces">        </span><span class="istickedoff">(OpenListing (C (pre1, post1) ()), OpenListing (C (pre2, post2) ())) -&gt; <span class="nottickedoff">OpenListing (C (pre1 ++ pre2, post1 ++ post2) ())</span></span>
+<span class="lineno">   22 </span><span class="spaces">        </span><span class="istickedoff">(ClosedListing, ExplicitListing a multiline) -&gt; <span class="nottickedoff">ExplicitListing a multiline</span></span>
+<span class="lineno">   23 </span><span class="spaces">        </span><span class="istickedoff">(ExplicitListing a multiline, ClosedListing) -&gt; <span class="nottickedoff">ExplicitListing a multiline</span></span>
+<span class="lineno">   24 </span><span class="spaces">        </span><span class="istickedoff">(OpenListing comments, ExplicitListing _a _multiline) -&gt; OpenListing comments</span>
+<span class="lineno">   25 </span><span class="spaces">        </span><span class="istickedoff">(ExplicitListing _a _multiline, OpenListing comments) -&gt; <span class="nottickedoff">OpenListing comments</span></span>
+<span class="lineno">   26 </span><span class="spaces">        </span><span class="istickedoff">(ExplicitListing a multiline1, ExplicitListing b multiline2) -&gt; ExplicitListing (merge a b) (multiline1 || multiline2)</span></span>
+<span class="lineno">   27 </span>
+<span class="lineno">   28 </span>
+<span class="lineno">   29 </span>type CommentedMap k v =
+<span class="lineno">   30 </span>    Map k (C2 'BeforeTerm 'AfterTerm v)
+<span class="lineno">   31 </span>
+<span class="lineno">   32 </span>mergeCommentedMap :: Ord k =&gt; (v -&gt; v -&gt; v) -&gt; CommentedMap k v -&gt; CommentedMap k v -&gt; CommentedMap k v
+<span class="lineno">   33 </span><span class="decl"><span class="istickedoff">mergeCommentedMap merge left right =</span>
+<span class="lineno">   34 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   35 </span><span class="spaces">        </span><span class="istickedoff">merge' (C (pre1, post1) a) (C (pre2, post2) b) =</span>
+<span class="lineno">   36 </span><span class="spaces">            </span><span class="istickedoff">C (pre1 ++ pre2, post1 ++ post2) (merge a b)</span>
+<span class="lineno">   37 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">   38 </span><span class="spaces">    </span><span class="istickedoff">unionWith merge' left right</span></span>
+<span class="lineno">   39 </span>
+<span class="lineno">   40 </span>
+<span class="lineno">   41 </span>-- | A value that can be imported or exported
+<span class="lineno">   42 </span>data Value
+<span class="lineno">   43 </span>    = Value !LowercaseIdentifier
+<span class="lineno">   44 </span>    | OpValue SymbolIdentifier
+<span class="lineno">   45 </span>    | Union (C1 'AfterTerm UppercaseIdentifier) (Listing (CommentedMap UppercaseIdentifier ()))
+<span class="lineno">   46 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Ord</span></span></span></span></span></span></span></span></span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>) -- TODO: is Ord needed?
+
+</pre>
+</body>
+</html>

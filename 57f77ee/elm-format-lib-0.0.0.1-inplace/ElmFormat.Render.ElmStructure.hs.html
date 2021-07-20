@@ -1,0 +1,371 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# OPTIONS_GHC -Wall #-}
+<span class="lineno">    2 </span>module ElmFormat.Render.ElmStructure
+<span class="lineno">    3 </span>  ( spaceSepOrStack, forceableSpaceSepOrStack, forceableSpaceSepOrStack1
+<span class="lineno">    4 </span>  , forceableRowOrStack
+<span class="lineno">    5 </span>  , spaceSepOrIndented, forceableSpaceSepOrIndented, spaceSepOrPrefix, prefixOrIndented
+<span class="lineno">    6 </span>  , equalsPair, definition
+<span class="lineno">    7 </span>  , application, group, group', extensionGroup, extensionGroup' )
+<span class="lineno">    8 </span>  where
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>
+<span class="lineno">   11 </span>import Elm.Utils ((|&gt;))
+<span class="lineno">   12 </span>import Box
+<span class="lineno">   13 </span>import AST.V0_16 (FunctionApplicationMultiline(..), Multiline(..))
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>import qualified Data.List as List
+<span class="lineno">   16 </span>
+<span class="lineno">   17 </span>
+<span class="lineno">   18 </span>{-| Same as `forceableSpaceSepOrStack False`
+<span class="lineno">   19 </span>-}
+<span class="lineno">   20 </span>spaceSepOrStack :: Box -&gt; [Box] -&gt; Box
+<span class="lineno">   21 </span><span class="decl"><span class="istickedoff">spaceSepOrStack =</span>
+<span class="lineno">   22 </span><span class="spaces">    </span><span class="istickedoff">forceableSpaceSepOrStack False</span></span>
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>{-|
+<span class="lineno">   26 </span>Formats as:
+<span class="lineno">   27 </span>
+<span class="lineno">   28 </span>    first rest0 rest1
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>    first
+<span class="lineno">   31 </span>    rest0
+<span class="lineno">   32 </span>    rest1
+<span class="lineno">   33 </span>-}
+<span class="lineno">   34 </span>forceableSpaceSepOrStack :: Bool -&gt; Box -&gt; [Box] -&gt; Box
+<span class="lineno">   35 </span><span class="decl"><span class="istickedoff">forceableSpaceSepOrStack forceMultiline first rest =</span>
+<span class="lineno">   36 </span><span class="spaces">    </span><span class="istickedoff">case</span>
+<span class="lineno">   37 </span><span class="spaces">      </span><span class="istickedoff">( forceMultiline, first, allSingles rest, <span class="nottickedoff">rest</span> )</span>
+<span class="lineno">   38 </span><span class="spaces">    </span><span class="istickedoff">of</span>
+<span class="lineno">   39 </span><span class="spaces">      </span><span class="istickedoff">( False, SingleLine first', Right rest', _ ) -&gt;</span>
+<span class="lineno">   40 </span><span class="spaces">        </span><span class="istickedoff">line $ row $ List.intersperse space (first' : rest')</span>
+<span class="lineno">   41 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   42 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   43 </span><span class="spaces">      </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   44 </span><span class="spaces">        </span><span class="istickedoff">stack1 (first : rest)</span></span>
+<span class="lineno">   45 </span>
+<span class="lineno">   46 </span>
+<span class="lineno">   47 </span>forceableRowOrStack :: Bool -&gt; Box -&gt; [Box] -&gt; Box
+<span class="lineno">   48 </span><span class="decl"><span class="istickedoff">forceableRowOrStack forceMultiline first rest =</span>
+<span class="lineno">   49 </span><span class="spaces">    </span><span class="istickedoff">case</span>
+<span class="lineno">   50 </span><span class="spaces">      </span><span class="istickedoff">( forceMultiline, first, allSingles rest, <span class="nottickedoff">rest</span> )</span>
+<span class="lineno">   51 </span><span class="spaces">    </span><span class="istickedoff">of</span>
+<span class="lineno">   52 </span><span class="spaces">      </span><span class="istickedoff">( False, SingleLine first', Right rest', _ ) -&gt;</span>
+<span class="lineno">   53 </span><span class="spaces">        </span><span class="istickedoff">line $ row (first' : rest')</span>
+<span class="lineno">   54 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   55 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   56 </span><span class="spaces">      </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   57 </span><span class="spaces">        </span><span class="istickedoff">stack1 (first : rest)</span></span>
+<span class="lineno">   58 </span>
+<span class="lineno">   59 </span>
+<span class="lineno">   60 </span>{-| Same as `forceableSpaceSepOrStack`
+<span class="lineno">   61 </span>-}
+<span class="lineno">   62 </span>forceableSpaceSepOrStack1 :: Bool -&gt; [Box] -&gt; Box
+<span class="lineno">   63 </span><span class="decl"><span class="istickedoff">forceableSpaceSepOrStack1 forceMultiline boxes =</span>
+<span class="lineno">   64 </span><span class="spaces">    </span><span class="istickedoff">case boxes of</span>
+<span class="lineno">   65 </span><span class="spaces">        </span><span class="istickedoff">(first:rest) -&gt;</span>
+<span class="lineno">   66 </span><span class="spaces">            </span><span class="istickedoff">forceableSpaceSepOrStack forceMultiline first rest</span>
+<span class="lineno">   67 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   68 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   69 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">error &quot;forceableSpaceSepOrStack1 with empty list&quot;</span></span></span>
+<span class="lineno">   70 </span>
+<span class="lineno">   71 </span>
+<span class="lineno">   72 </span>{-|
+<span class="lineno">   73 </span>Formats as:
+<span class="lineno">   74 </span>
+<span class="lineno">   75 </span>    first rest0 rest1 rest2
+<span class="lineno">   76 </span>
+<span class="lineno">   77 </span>    first
+<span class="lineno">   78 </span>      rest0
+<span class="lineno">   79 </span>      rest1
+<span class="lineno">   80 </span>      rest2
+<span class="lineno">   81 </span>-}
+<span class="lineno">   82 </span>spaceSepOrIndented :: Box -&gt; [Box] -&gt; Box
+<span class="lineno">   83 </span><span class="decl"><span class="istickedoff">spaceSepOrIndented =</span>
+<span class="lineno">   84 </span><span class="spaces">    </span><span class="istickedoff">forceableSpaceSepOrIndented False</span></span>
+<span class="lineno">   85 </span>
+<span class="lineno">   86 </span>
+<span class="lineno">   87 </span>forceableSpaceSepOrIndented :: Bool -&gt; Box -&gt; [Box] -&gt; Box
+<span class="lineno">   88 </span><span class="decl"><span class="istickedoff">forceableSpaceSepOrIndented forceMultiline first rest =</span>
+<span class="lineno">   89 </span><span class="spaces">  </span><span class="istickedoff">case</span>
+<span class="lineno">   90 </span><span class="spaces">    </span><span class="istickedoff">( forceMultiline, first, allSingles rest, <span class="nottickedoff">rest</span> )</span>
+<span class="lineno">   91 </span><span class="spaces">  </span><span class="istickedoff">of</span>
+<span class="lineno">   92 </span><span class="spaces">    </span><span class="istickedoff">( False, SingleLine first', Right rest', _ ) -&gt;</span>
+<span class="lineno">   93 </span><span class="spaces">      </span><span class="istickedoff">line $ row $ List.intersperse space (first' : rest')</span>
+<span class="lineno">   94 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   95 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   96 </span><span class="spaces">    </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   97 </span><span class="spaces">      </span><span class="istickedoff">stack1</span>
+<span class="lineno">   98 </span><span class="spaces">        </span><span class="istickedoff">( first : map indent rest)</span></span>
+<span class="lineno">   99 </span>
+<span class="lineno">  100 </span>
+<span class="lineno">  101 </span>{-|
+<span class="lineno">  102 </span>Formats as:
+<span class="lineno">  103 </span>
+<span class="lineno">  104 </span>    op rest
+<span class="lineno">  105 </span>
+<span class="lineno">  106 </span>    op rest1
+<span class="lineno">  107 </span>       rest2
+<span class="lineno">  108 </span>
+<span class="lineno">  109 </span>    opLong
+<span class="lineno">  110 </span>        rest
+<span class="lineno">  111 </span>-}
+<span class="lineno">  112 </span>spaceSepOrPrefix :: Box -&gt; Box -&gt; Box
+<span class="lineno">  113 </span><span class="decl"><span class="istickedoff">spaceSepOrPrefix op rest =</span>
+<span class="lineno">  114 </span><span class="spaces">    </span><span class="istickedoff">case ( op, rest) of</span>
+<span class="lineno">  115 </span><span class="spaces">        </span><span class="istickedoff">( SingleLine op', SingleLine rest' ) -&gt;</span>
+<span class="lineno">  116 </span><span class="spaces">            </span><span class="istickedoff">line $ row [ op', space, rest' ]</span>
+<span class="lineno">  117 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  118 </span><span class="spaces">        </span><span class="istickedoff">( SingleLine op', _ ) | lineLength 0 op' &lt; 4 -&gt;</span>
+<span class="lineno">  119 </span><span class="spaces">            </span><span class="istickedoff">prefix (row [ op', space ]) rest</span>
+<span class="lineno">  120 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  121 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  122 </span><span class="spaces">            </span><span class="istickedoff">stack1 [ op, indent rest ]</span></span>
+<span class="lineno">  123 </span>
+<span class="lineno">  124 </span>
+<span class="lineno">  125 </span>prefixOrIndented :: Box -&gt; Box -&gt; Box
+<span class="lineno">  126 </span><span class="decl"><span class="istickedoff">prefixOrIndented a b =</span>
+<span class="lineno">  127 </span><span class="spaces">    </span><span class="istickedoff">case ( a, b ) of</span>
+<span class="lineno">  128 </span><span class="spaces">        </span><span class="istickedoff">( SingleLine a', SingleLine b' ) -&gt;</span>
+<span class="lineno">  129 </span><span class="spaces">            </span><span class="istickedoff">line $ row [ a', space, b' ]</span>
+<span class="lineno">  130 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  131 </span><span class="spaces">        </span><span class="istickedoff">( SingleLine a', MustBreak b' ) -&gt;</span>
+<span class="lineno">  132 </span><span class="spaces">            </span><span class="istickedoff">mustBreak $ row [ a', space, b' ]</span>
+<span class="lineno">  133 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  134 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  135 </span><span class="spaces">            </span><span class="istickedoff">stack1 [ a, indent b ]</span></span>
+<span class="lineno">  136 </span>
+<span class="lineno">  137 </span>
+<span class="lineno">  138 </span>{-|
+<span class="lineno">  139 </span>Formats as:
+<span class="lineno">  140 </span>
+<span class="lineno">  141 </span>    left = right
+<span class="lineno">  142 </span>
+<span class="lineno">  143 </span>    left =
+<span class="lineno">  144 </span>      right
+<span class="lineno">  145 </span>
+<span class="lineno">  146 </span>    left
+<span class="lineno">  147 </span>      =
+<span class="lineno">  148 </span>      right
+<span class="lineno">  149 </span>-}
+<span class="lineno">  150 </span>equalsPair :: String -&gt; Bool -&gt; Box -&gt; Box -&gt; Box
+<span class="lineno">  151 </span><span class="decl"><span class="istickedoff">equalsPair symbol forceMultiline left right =</span>
+<span class="lineno">  152 </span><span class="spaces">  </span><span class="istickedoff">case (forceMultiline, left, right) of</span>
+<span class="lineno">  153 </span><span class="spaces">    </span><span class="istickedoff">( False, SingleLine left', SingleLine right' ) -&gt;</span>
+<span class="lineno">  154 </span><span class="spaces">      </span><span class="istickedoff">line $ row</span>
+<span class="lineno">  155 </span><span class="spaces">        </span><span class="istickedoff">[ left'</span>
+<span class="lineno">  156 </span><span class="spaces">        </span><span class="istickedoff">, space</span>
+<span class="lineno">  157 </span><span class="spaces">        </span><span class="istickedoff">, punc symbol</span>
+<span class="lineno">  158 </span><span class="spaces">        </span><span class="istickedoff">, space</span>
+<span class="lineno">  159 </span><span class="spaces">        </span><span class="istickedoff">, right'</span>
+<span class="lineno">  160 </span><span class="spaces">        </span><span class="istickedoff">]</span>
+<span class="lineno">  161 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  162 </span><span class="spaces">    </span><span class="istickedoff">( _, SingleLine left', MustBreak right' ) -&gt;</span>
+<span class="lineno">  163 </span><span class="spaces">      </span><span class="istickedoff"><span class="nottickedoff">mustBreak $ row</span></span>
+<span class="lineno">  164 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">[ left'</span></span>
+<span class="lineno">  165 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">, space</span></span>
+<span class="lineno">  166 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">, punc symbol</span></span>
+<span class="lineno">  167 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">, space</span></span>
+<span class="lineno">  168 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">, right'</span></span>
+<span class="lineno">  169 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">]</span></span>
+<span class="lineno">  170 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  171 </span><span class="spaces">    </span><span class="istickedoff">( _, SingleLine left', right' ) -&gt;</span>
+<span class="lineno">  172 </span><span class="spaces">      </span><span class="istickedoff">stack1</span>
+<span class="lineno">  173 </span><span class="spaces">        </span><span class="istickedoff">[ line $ row [ left', space, punc symbol ]</span>
+<span class="lineno">  174 </span><span class="spaces">        </span><span class="istickedoff">, indent right'</span>
+<span class="lineno">  175 </span><span class="spaces">        </span><span class="istickedoff">]</span>
+<span class="lineno">  176 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  177 </span><span class="spaces">    </span><span class="istickedoff">( _, left', right' ) -&gt;</span>
+<span class="lineno">  178 </span><span class="spaces">      </span><span class="istickedoff">stack1</span>
+<span class="lineno">  179 </span><span class="spaces">        </span><span class="istickedoff">[ left'</span>
+<span class="lineno">  180 </span><span class="spaces">        </span><span class="istickedoff">, indent $ line $ punc symbol</span>
+<span class="lineno">  181 </span><span class="spaces">        </span><span class="istickedoff">, indent right'</span>
+<span class="lineno">  182 </span><span class="spaces">        </span><span class="istickedoff">]</span></span>
+<span class="lineno">  183 </span>
+<span class="lineno">  184 </span>
+<span class="lineno">  185 </span>{-|
+<span class="lineno">  186 </span>An equalsPair where the left side is an application
+<span class="lineno">  187 </span>-}
+<span class="lineno">  188 </span>definition :: String -&gt; Bool -&gt; Box -&gt; [Box] -&gt; Box -&gt; Box
+<span class="lineno">  189 </span><span class="decl"><span class="istickedoff">definition symbol forceMultiline first rest =</span>
+<span class="lineno">  190 </span><span class="spaces">  </span><span class="istickedoff">equalsPair symbol forceMultiline</span>
+<span class="lineno">  191 </span><span class="spaces">    </span><span class="istickedoff">(application (FAJoinFirst JoinAll) first rest)</span></span>
+<span class="lineno">  192 </span>
+<span class="lineno">  193 </span>
+<span class="lineno">  194 </span>{-|
+<span class="lineno">  195 </span>Formats as:
+<span class="lineno">  196 </span>
+<span class="lineno">  197 </span>    first rest0 rest1 rest2
+<span class="lineno">  198 </span>
+<span class="lineno">  199 </span>    first rest0
+<span class="lineno">  200 </span>      rest1
+<span class="lineno">  201 </span>      rest2
+<span class="lineno">  202 </span>
+<span class="lineno">  203 </span>    first
+<span class="lineno">  204 </span>      rest0
+<span class="lineno">  205 </span>      rest1
+<span class="lineno">  206 </span>      rest2
+<span class="lineno">  207 </span>-}
+<span class="lineno">  208 </span>application :: FunctionApplicationMultiline -&gt; Box -&gt; [Box] -&gt; Box
+<span class="lineno">  209 </span><span class="decl"><span class="istickedoff">application forceMultiline first args =</span>
+<span class="lineno">  210 </span><span class="spaces">  </span><span class="istickedoff">case args of</span>
+<span class="lineno">  211 </span><span class="spaces">    </span><span class="istickedoff">[] -&gt;</span>
+<span class="lineno">  212 </span><span class="spaces">      </span><span class="istickedoff">first</span>
+<span class="lineno">  213 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  214 </span><span class="spaces">    </span><span class="istickedoff">arg0 : rest -&gt;</span>
+<span class="lineno">  215 </span><span class="spaces">      </span><span class="istickedoff">case</span>
+<span class="lineno">  216 </span><span class="spaces">        </span><span class="istickedoff">( forceMultiline</span>
+<span class="lineno">  217 </span><span class="spaces">        </span><span class="istickedoff">, first</span>
+<span class="lineno">  218 </span><span class="spaces">        </span><span class="istickedoff">, arg0</span>
+<span class="lineno">  219 </span><span class="spaces">        </span><span class="istickedoff">, allSingles rest</span>
+<span class="lineno">  220 </span><span class="spaces">        </span><span class="istickedoff">)</span>
+<span class="lineno">  221 </span><span class="spaces">      </span><span class="istickedoff">of</span>
+<span class="lineno">  222 </span><span class="spaces">        </span><span class="istickedoff">( FAJoinFirst JoinAll, SingleLine first', SingleLine arg0', Right rest' ) -&gt;</span>
+<span class="lineno">  223 </span><span class="spaces">          </span><span class="istickedoff">(first' : arg0' : rest' )</span>
+<span class="lineno">  224 </span><span class="spaces">            </span><span class="istickedoff">|&gt; List.intersperse space</span>
+<span class="lineno">  225 </span><span class="spaces">            </span><span class="istickedoff">|&gt; row</span>
+<span class="lineno">  226 </span><span class="spaces">            </span><span class="istickedoff">|&gt; line</span>
+<span class="lineno">  227 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  228 </span><span class="spaces">        </span><span class="istickedoff">( FAJoinFirst _, SingleLine first', SingleLine arg0', _) -&gt;</span>
+<span class="lineno">  229 </span><span class="spaces">          </span><span class="istickedoff">stack1</span>
+<span class="lineno">  230 </span><span class="spaces">            </span><span class="istickedoff">$ line ( row [ first', space, arg0' ])</span>
+<span class="lineno">  231 </span><span class="spaces">              </span><span class="istickedoff">: map indent rest</span>
+<span class="lineno">  232 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  233 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  234 </span><span class="spaces">          </span><span class="istickedoff">stack1</span>
+<span class="lineno">  235 </span><span class="spaces">            </span><span class="istickedoff">$ first : map indent (arg0 : rest)</span></span>
+<span class="lineno">  236 </span>
+<span class="lineno">  237 </span>{-|
+<span class="lineno">  238 </span>`group True '&lt;' ';' '&gt;'` formats as:
+<span class="lineno">  239 </span>
+<span class="lineno">  240 </span>    &lt;&gt;
+<span class="lineno">  241 </span>
+<span class="lineno">  242 </span>    &lt; child0 &gt;
+<span class="lineno">  243 </span>
+<span class="lineno">  244 </span>    &lt; child0; child1; child2 &gt;
+<span class="lineno">  245 </span>
+<span class="lineno">  246 </span>    &lt; child0
+<span class="lineno">  247 </span>    ; child1
+<span class="lineno">  248 </span>    ; child2
+<span class="lineno">  249 </span>    &gt;
+<span class="lineno">  250 </span>-}
+<span class="lineno">  251 </span>group :: Bool -&gt; String -&gt; String -&gt; String -&gt; Bool -&gt; [Box] -&gt; Box
+<span class="lineno">  252 </span><span class="decl"><span class="istickedoff">group innerSpaces left sep right forceMultiline children =</span>
+<span class="lineno">  253 </span><span class="spaces">  </span><span class="istickedoff">group' innerSpaces left sep [] right forceMultiline children</span></span>
+<span class="lineno">  254 </span>
+<span class="lineno">  255 </span>
+<span class="lineno">  256 </span>group' :: Bool -&gt; String -&gt; String -&gt; [Box] -&gt; String -&gt; Bool -&gt; [Box] -&gt; Box
+<span class="lineno">  257 </span><span class="decl"><span class="istickedoff">group' innerSpaces left sep extraFooter right forceMultiline children =</span>
+<span class="lineno">  258 </span><span class="spaces">  </span><span class="istickedoff">case (forceMultiline, allSingles children, allSingles extraFooter) of</span>
+<span class="lineno">  259 </span><span class="spaces">    </span><span class="istickedoff">(_, Right [], Right efs) -&gt;</span>
+<span class="lineno">  260 </span><span class="spaces">      </span><span class="istickedoff"><span class="nottickedoff">line $ row $ concat [[punc left], efs, [punc right]]</span></span>
+<span class="lineno">  261 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  262 </span><span class="spaces">    </span><span class="istickedoff">(False, Right ls, Right efs) -&gt;</span>
+<span class="lineno">  263 </span><span class="spaces">      </span><span class="istickedoff">line $ row $ concat</span>
+<span class="lineno">  264 </span><span class="spaces">        </span><span class="istickedoff">[ if innerSpaces then [punc left, space] else [punc left]</span>
+<span class="lineno">  265 </span><span class="spaces">        </span><span class="istickedoff">, List.intersperse (row [punc sep, space]) (ls ++ efs)</span>
+<span class="lineno">  266 </span><span class="spaces">        </span><span class="istickedoff">, if innerSpaces then [space, punc right] else [punc right]</span>
+<span class="lineno">  267 </span><span class="spaces">        </span><span class="istickedoff">]</span>
+<span class="lineno">  268 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  269 </span><span class="spaces">    </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  270 </span><span class="spaces">      </span><span class="istickedoff">case children of</span>
+<span class="lineno">  271 </span><span class="spaces">        </span><span class="istickedoff">[] -&gt;</span>
+<span class="lineno">  272 </span><span class="spaces">          </span><span class="istickedoff">-- TODO: might lose extraFooter in this case, but can that ever happen?</span>
+<span class="lineno">  273 </span><span class="spaces">          </span><span class="istickedoff"><span class="nottickedoff">line $ row [ punc left, punc right]</span></span>
+<span class="lineno">  274 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  275 </span><span class="spaces">        </span><span class="istickedoff">(first:rest) -&gt;</span>
+<span class="lineno">  276 </span><span class="spaces">          </span><span class="istickedoff">stack1 $</span>
+<span class="lineno">  277 </span><span class="spaces">            </span><span class="istickedoff">prefix (row [punc left, space]) first</span>
+<span class="lineno">  278 </span><span class="spaces">            </span><span class="istickedoff">: map (prefix $ row [punc sep, space]) rest</span>
+<span class="lineno">  279 </span><span class="spaces">            </span><span class="istickedoff">++ extraFooter</span>
+<span class="lineno">  280 </span><span class="spaces">            </span><span class="istickedoff">++ [ line $ punc right ]</span></span>
+<span class="lineno">  281 </span>
+<span class="lineno">  282 </span>{-|
+<span class="lineno">  283 </span>Formats as:
+<span class="lineno">  284 </span>
+<span class="lineno">  285 </span>    { base | first }
+<span class="lineno">  286 </span>
+<span class="lineno">  287 </span>    { base | first, rest0, rest1 }
+<span class="lineno">  288 </span>
+<span class="lineno">  289 </span>    { base
+<span class="lineno">  290 </span>      | first
+<span class="lineno">  291 </span>      , rest0
+<span class="lineno">  292 </span>      , rest1
+<span class="lineno">  293 </span>    }
+<span class="lineno">  294 </span>-}
+<span class="lineno">  295 </span>extensionGroup :: Bool -&gt; Box -&gt; Box -&gt; [Box] -&gt; Box
+<span class="lineno">  296 </span><span class="decl"><span class="nottickedoff">extensionGroup multiline base first rest =</span>
+<span class="lineno">  297 </span><span class="spaces">  </span><span class="nottickedoff">case</span>
+<span class="lineno">  298 </span><span class="spaces">    </span><span class="nottickedoff">( multiline</span>
+<span class="lineno">  299 </span><span class="spaces">    </span><span class="nottickedoff">, isLine base</span>
+<span class="lineno">  300 </span><span class="spaces">    </span><span class="nottickedoff">, allSingles (first : rest)</span>
+<span class="lineno">  301 </span><span class="spaces">    </span><span class="nottickedoff">)</span>
+<span class="lineno">  302 </span><span class="spaces">  </span><span class="nottickedoff">of</span>
+<span class="lineno">  303 </span><span class="spaces">    </span><span class="nottickedoff">(False, Right base', Right fields') -&gt;</span>
+<span class="lineno">  304 </span><span class="spaces">      </span><span class="nottickedoff">line $ row</span>
+<span class="lineno">  305 </span><span class="spaces">        </span><span class="nottickedoff">[ punc &quot;{&quot;</span>
+<span class="lineno">  306 </span><span class="spaces">        </span><span class="nottickedoff">, space</span>
+<span class="lineno">  307 </span><span class="spaces">        </span><span class="nottickedoff">, base'</span>
+<span class="lineno">  308 </span><span class="spaces">        </span><span class="nottickedoff">, space</span>
+<span class="lineno">  309 </span><span class="spaces">        </span><span class="nottickedoff">, punc &quot;|&quot;</span>
+<span class="lineno">  310 </span><span class="spaces">        </span><span class="nottickedoff">, space</span>
+<span class="lineno">  311 </span><span class="spaces">        </span><span class="nottickedoff">, row (List.intersperse (row [punc &quot;,&quot;, space]) fields')</span>
+<span class="lineno">  312 </span><span class="spaces">        </span><span class="nottickedoff">, space</span>
+<span class="lineno">  313 </span><span class="spaces">        </span><span class="nottickedoff">, punc &quot;}&quot;</span>
+<span class="lineno">  314 </span><span class="spaces">        </span><span class="nottickedoff">]</span>
+<span class="lineno">  315 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  316 </span><span class="spaces">    </span><span class="nottickedoff">_ -&gt;</span>
+<span class="lineno">  317 </span><span class="spaces">      </span><span class="nottickedoff">stack1</span>
+<span class="lineno">  318 </span><span class="spaces">        </span><span class="nottickedoff">[ prefix (row [punc &quot;{&quot;, space]) base</span>
+<span class="lineno">  319 </span><span class="spaces">        </span><span class="nottickedoff">, stack1</span>
+<span class="lineno">  320 </span><span class="spaces">            </span><span class="nottickedoff">( prefix (row [punc &quot;|&quot;, space]) first</span>
+<span class="lineno">  321 </span><span class="spaces">            </span><span class="nottickedoff">: map (prefix (row [punc &quot;,&quot;, space])) rest)</span>
+<span class="lineno">  322 </span><span class="spaces">            </span><span class="nottickedoff">|&gt; indent</span>
+<span class="lineno">  323 </span><span class="spaces">        </span><span class="nottickedoff">, line $ punc &quot;}&quot;</span>
+<span class="lineno">  324 </span><span class="spaces">        </span><span class="nottickedoff">]</span></span>
+<span class="lineno">  325 </span>
+<span class="lineno">  326 </span>
+<span class="lineno">  327 </span>extensionGroup' :: Bool -&gt; Box -&gt; Box -&gt; Box
+<span class="lineno">  328 </span><span class="decl"><span class="istickedoff">extensionGroup' multiline base fields =</span>
+<span class="lineno">  329 </span><span class="spaces">  </span><span class="istickedoff">case</span>
+<span class="lineno">  330 </span><span class="spaces">    </span><span class="istickedoff">( multiline</span>
+<span class="lineno">  331 </span><span class="spaces">    </span><span class="istickedoff">, base</span>
+<span class="lineno">  332 </span><span class="spaces">    </span><span class="istickedoff">, fields</span>
+<span class="lineno">  333 </span><span class="spaces">    </span><span class="istickedoff">)</span>
+<span class="lineno">  334 </span><span class="spaces">  </span><span class="istickedoff">of</span>
+<span class="lineno">  335 </span><span class="spaces">    </span><span class="istickedoff">(False, SingleLine base', SingleLine fields') -&gt;</span>
+<span class="lineno">  336 </span><span class="spaces">      </span><span class="istickedoff">line $ row $ List.intersperse space</span>
+<span class="lineno">  337 </span><span class="spaces">        </span><span class="istickedoff">[ punc &quot;{&quot;</span>
+<span class="lineno">  338 </span><span class="spaces">        </span><span class="istickedoff">, base'</span>
+<span class="lineno">  339 </span><span class="spaces">        </span><span class="istickedoff">, fields'</span>
+<span class="lineno">  340 </span><span class="spaces">        </span><span class="istickedoff">, punc &quot;}&quot;</span>
+<span class="lineno">  341 </span><span class="spaces">        </span><span class="istickedoff">]</span>
+<span class="lineno">  342 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  343 </span><span class="spaces">    </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  344 </span><span class="spaces">      </span><span class="istickedoff">stack1</span>
+<span class="lineno">  345 </span><span class="spaces">        </span><span class="istickedoff">[ prefix (row [punc &quot;{&quot;, space]) base</span>
+<span class="lineno">  346 </span><span class="spaces">        </span><span class="istickedoff">, indent fields</span>
+<span class="lineno">  347 </span><span class="spaces">        </span><span class="istickedoff">, line $ punc &quot;}&quot;</span>
+<span class="lineno">  348 </span><span class="spaces">        </span><span class="istickedoff">]</span></span>
+
+</pre>
+</body>
+</html>

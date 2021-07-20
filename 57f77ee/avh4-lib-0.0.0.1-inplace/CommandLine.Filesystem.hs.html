@@ -1,0 +1,78 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module CommandLine.Filesystem where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import CommandLine.World
+<span class="lineno">    4 </span>import System.FilePath ((&lt;/&gt;))
+<span class="lineno">    5 </span>import qualified System.FilePath as FilePath
+<span class="lineno">    6 </span>
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>collectFiles :: Monad m =&gt; (a -&gt; m [a]) -&gt; a -&gt; m [a]
+<span class="lineno">    9 </span><span class="decl"><span class="istickedoff">collectFiles children root =</span>
+<span class="lineno">   10 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">   11 </span><span class="spaces">        </span><span class="istickedoff">xs &lt;- children root</span>
+<span class="lineno">   12 </span><span class="spaces">        </span><span class="istickedoff">subChildren &lt;- mapM (collectFiles children) xs</span>
+<span class="lineno">   13 </span><span class="spaces">        </span><span class="istickedoff">return $ root : concat subChildren</span></span>
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>
+<span class="lineno">   16 </span>listDir :: World m =&gt; FilePath -&gt; m [FilePath]
+<span class="lineno">   17 </span><span class="decl"><span class="istickedoff">listDir path =</span>
+<span class="lineno">   18 </span><span class="spaces">    </span><span class="istickedoff">map (path &lt;/&gt;) &lt;$&gt; listDirectory path</span></span>
+<span class="lineno">   19 </span>
+<span class="lineno">   20 </span>
+<span class="lineno">   21 </span>fileList :: World m =&gt; FilePath -&gt; m [FilePath]
+<span class="lineno">   22 </span><span class="decl"><span class="istickedoff">fileList =</span>
+<span class="lineno">   23 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">   24 </span><span class="spaces">      </span><span class="istickedoff">children path =</span>
+<span class="lineno">   25 </span><span class="spaces">          </span><span class="istickedoff">if <span class="tickonlyfalse">isSkippable path</span> then</span>
+<span class="lineno">   26 </span><span class="spaces">              </span><span class="istickedoff"><span class="nottickedoff">return []</span></span>
+<span class="lineno">   27 </span><span class="spaces">          </span><span class="istickedoff">else</span>
+<span class="lineno">   28 </span><span class="spaces">              </span><span class="istickedoff">do</span>
+<span class="lineno">   29 </span><span class="spaces">                  </span><span class="istickedoff">directory &lt;- doesDirectoryExist path</span>
+<span class="lineno">   30 </span><span class="spaces">                  </span><span class="istickedoff">if directory then listDir path else return []</span>
+<span class="lineno">   31 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">   32 </span><span class="spaces">      </span><span class="istickedoff">collectFiles children</span></span>
+<span class="lineno">   33 </span>
+<span class="lineno">   34 </span>
+<span class="lineno">   35 </span>isSkippable :: FilePath -&gt; Bool
+<span class="lineno">   36 </span><span class="decl"><span class="istickedoff">isSkippable path =</span>
+<span class="lineno">   37 </span><span class="spaces">    </span><span class="istickedoff">or</span>
+<span class="lineno">   38 </span><span class="spaces">        </span><span class="istickedoff">[ hasFilename &quot;elm-stuff&quot; path</span>
+<span class="lineno">   39 </span><span class="spaces">        </span><span class="istickedoff">, hasFilename &quot;node_modules&quot; path</span>
+<span class="lineno">   40 </span><span class="spaces">        </span><span class="istickedoff">, hasFilename &quot;.git&quot; path</span>
+<span class="lineno">   41 </span><span class="spaces">        </span><span class="istickedoff">]</span></span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>hasExtension :: String -&gt; FilePath -&gt; Bool
+<span class="lineno">   44 </span><span class="decl"><span class="istickedoff">hasExtension ext path =</span>
+<span class="lineno">   45 </span><span class="spaces">    </span><span class="istickedoff">ext == FilePath.takeExtension path</span></span>
+<span class="lineno">   46 </span>
+<span class="lineno">   47 </span>
+<span class="lineno">   48 </span>findAllElmFiles :: World m =&gt; FilePath -&gt; m [FilePath]
+<span class="lineno">   49 </span><span class="decl"><span class="istickedoff">findAllElmFiles inputFile =</span>
+<span class="lineno">   50 </span><span class="spaces">    </span><span class="istickedoff">filter (hasExtension &quot;.elm&quot;) &lt;$&gt; fileList inputFile</span></span>
+<span class="lineno">   51 </span>
+<span class="lineno">   52 </span>
+<span class="lineno">   53 </span>hasFilename :: String -&gt; FilePath -&gt; Bool
+<span class="lineno">   54 </span><span class="decl"><span class="istickedoff">hasFilename name path =</span>
+<span class="lineno">   55 </span><span class="spaces">    </span><span class="istickedoff">name == FilePath.takeFileName path</span></span>
+
+</pre>
+</body>
+</html>

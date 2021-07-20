@@ -1,0 +1,199 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module Parse.Whitespace where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import AST.V0_16
+<span class="lineno">    4 </span>import qualified Cheapskate.Types as Markdown
+<span class="lineno">    5 </span>import qualified Data.Char as Char
+<span class="lineno">    6 </span>import Parse.IParser
+<span class="lineno">    7 </span>import qualified Parse.Markdown as Markdown
+<span class="lineno">    8 </span>import qualified Parse.State as State
+<span class="lineno">    9 </span>import qualified Reporting.Error.Syntax as Syntax
+<span class="lineno">   10 </span>import Text.Parsec hiding (newline, spaces, State)
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>padded :: IParser a -&gt; IParser (C2 before after a)
+<span class="lineno">   14 </span><span class="decl"><span class="istickedoff">padded p =</span>
+<span class="lineno">   15 </span><span class="spaces">  </span><span class="istickedoff">do  pre &lt;- whitespace</span>
+<span class="lineno">   16 </span><span class="spaces">      </span><span class="istickedoff">out &lt;- p</span>
+<span class="lineno">   17 </span><span class="spaces">      </span><span class="istickedoff">post &lt;- whitespace</span>
+<span class="lineno">   18 </span><span class="spaces">      </span><span class="istickedoff">return $ C (pre, post) out</span></span>
+<span class="lineno">   19 </span>
+<span class="lineno">   20 </span>
+<span class="lineno">   21 </span>spaces :: IParser Comments
+<span class="lineno">   22 </span><span class="decl"><span class="istickedoff">spaces =</span>
+<span class="lineno">   23 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">   24 </span><span class="spaces">      </span><span class="istickedoff">blank = string &quot; &quot; &gt;&gt; return []</span>
+<span class="lineno">   25 </span><span class="spaces">      </span><span class="istickedoff">comment = ((: []) &lt;$&gt; multiComment)</span>
+<span class="lineno">   26 </span><span class="spaces">      </span><span class="istickedoff">space =</span>
+<span class="lineno">   27 </span><span class="spaces">        </span><span class="istickedoff">blank</span>
+<span class="lineno">   28 </span><span class="spaces">        </span><span class="istickedoff">&lt;|&gt; (const [CommentTrickOpener] &lt;$&gt; (try $ string &quot;{--}&quot;))</span>
+<span class="lineno">   29 </span><span class="spaces">        </span><span class="istickedoff">&lt;|&gt; comment</span>
+<span class="lineno">   30 </span><span class="spaces">        </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">Syntax.whitespace</span></span>
+<span class="lineno">   31 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">   32 </span><span class="spaces">      </span><span class="istickedoff">concat &lt;$&gt; many1 space</span></span>
+<span class="lineno">   33 </span>
+<span class="lineno">   34 </span>
+<span class="lineno">   35 </span>forcedWS :: IParser Comments
+<span class="lineno">   36 </span><span class="decl"><span class="istickedoff">forcedWS =</span>
+<span class="lineno">   37 </span><span class="spaces">  </span><span class="istickedoff">choice</span>
+<span class="lineno">   38 </span><span class="spaces">    </span><span class="istickedoff">[ (++) &lt;$&gt; spaces &lt;*&gt; (concat &lt;$&gt; many nl_space)</span>
+<span class="lineno">   39 </span><span class="spaces">    </span><span class="istickedoff">, concat &lt;$&gt; many1 nl_space</span>
+<span class="lineno">   40 </span><span class="spaces">    </span><span class="istickedoff">]</span>
+<span class="lineno">   41 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">   42 </span><span class="spaces">    </span><span class="istickedoff">nl_space =</span>
+<span class="lineno">   43 </span><span class="spaces">      </span><span class="istickedoff">try ((++) &lt;$&gt; (concat &lt;$&gt; many1 newline) &lt;*&gt; option [] spaces)</span></span>
+<span class="lineno">   44 </span>
+<span class="lineno">   45 </span>
+<span class="lineno">   46 </span>-- Just eats whitespace until the next meaningful character.
+<span class="lineno">   47 </span>dumbWhitespace :: IParser Comments
+<span class="lineno">   48 </span><span class="decl"><span class="nottickedoff">dumbWhitespace =</span>
+<span class="lineno">   49 </span><span class="spaces">  </span><span class="nottickedoff">concat &lt;$&gt; many (spaces &lt;|&gt; newline)</span></span>
+<span class="lineno">   50 </span>
+<span class="lineno">   51 </span>
+<span class="lineno">   52 </span>whitespace' :: IParser (Bool, Comments)
+<span class="lineno">   53 </span><span class="decl"><span class="istickedoff">whitespace' =</span>
+<span class="lineno">   54 </span><span class="spaces">  </span><span class="istickedoff">option (False, []) ((,) True &lt;$&gt; forcedWS)</span></span>
+<span class="lineno">   55 </span>
+<span class="lineno">   56 </span>
+<span class="lineno">   57 </span>whitespace :: IParser Comments
+<span class="lineno">   58 </span><span class="decl"><span class="istickedoff">whitespace =</span>
+<span class="lineno">   59 </span><span class="spaces">  </span><span class="istickedoff">snd &lt;$&gt; whitespace'</span></span>
+<span class="lineno">   60 </span>
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>freshLine :: IParser Comments
+<span class="lineno">   63 </span><span class="decl"><span class="istickedoff">freshLine =</span>
+<span class="lineno">   64 </span><span class="spaces">      </span><span class="istickedoff">concat &lt;$&gt; (try ((++) &lt;$&gt; many1 newline &lt;*&gt; many space_nl) &lt;|&gt; try (many1 space_nl)) &lt;?&gt; <span class="nottickedoff">Syntax.freshLine</span></span>
+<span class="lineno">   65 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">   66 </span><span class="spaces">    </span><span class="istickedoff">space_nl = try $ (++) &lt;$&gt; spaces &lt;*&gt; (concat &lt;$&gt; many1 newline)</span></span>
+<span class="lineno">   67 </span>
+<span class="lineno">   68 </span>
+<span class="lineno">   69 </span>newline :: IParser Comments
+<span class="lineno">   70 </span><span class="decl"><span class="istickedoff">newline =</span>
+<span class="lineno">   71 </span><span class="spaces">    </span><span class="istickedoff">(simpleNewline &gt;&gt; return []) &lt;|&gt; ((\x -&gt; [x]) &lt;$&gt; lineComment) &lt;?&gt; <span class="nottickedoff">Syntax.newline</span></span></span>
+<span class="lineno">   72 </span>
+<span class="lineno">   73 </span>
+<span class="lineno">   74 </span>simpleNewline :: IParser ()
+<span class="lineno">   75 </span><span class="decl"><span class="istickedoff">simpleNewline =</span>
+<span class="lineno">   76 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- try (string &quot;\r\n&quot;) &lt;|&gt; string &quot;\n&quot;</span>
+<span class="lineno">   77 </span><span class="spaces">      </span><span class="istickedoff">updateState State.setNewline</span>
+<span class="lineno">   78 </span><span class="spaces">      </span><span class="istickedoff">return ()</span></span>
+<span class="lineno">   79 </span>
+<span class="lineno">   80 </span>
+<span class="lineno">   81 </span>trackNewline :: IParser a -&gt; IParser (a, Multiline)
+<span class="lineno">   82 </span><span class="decl"><span class="istickedoff">trackNewline parser =</span>
+<span class="lineno">   83 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">   84 </span><span class="spaces">        </span><span class="istickedoff">updateState State.pushNewlineContext</span>
+<span class="lineno">   85 </span><span class="spaces">        </span><span class="istickedoff">a &lt;- parser</span>
+<span class="lineno">   86 </span><span class="spaces">        </span><span class="istickedoff">state &lt;- getState</span>
+<span class="lineno">   87 </span><span class="spaces">        </span><span class="istickedoff">updateState State.popNewlineContext</span>
+<span class="lineno">   88 </span><span class="spaces">        </span><span class="istickedoff">return (a, if State.sawNewline state then SplitAll else JoinAll)</span></span>
+<span class="lineno">   89 </span>
+<span class="lineno">   90 </span>
+<span class="lineno">   91 </span>lineComment :: IParser Comment
+<span class="lineno">   92 </span><span class="decl"><span class="istickedoff">lineComment =</span>
+<span class="lineno">   93 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- try (string &quot;--&quot;)</span>
+<span class="lineno">   94 </span><span class="spaces">      </span><span class="istickedoff">choice</span>
+<span class="lineno">   95 </span><span class="spaces">        </span><span class="istickedoff">[ const CommentTrickCloser</span>
+<span class="lineno">   96 </span><span class="spaces">            </span><span class="istickedoff">&lt;$&gt; try (char '}' &gt;&gt; many (char ' ') &gt;&gt; (simpleNewline &lt;|&gt; <span class="nottickedoff">eof</span>))</span>
+<span class="lineno">   97 </span><span class="spaces">        </span><span class="istickedoff">, do</span>
+<span class="lineno">   98 </span><span class="spaces">            </span><span class="istickedoff">(comment, ()) &lt;-</span>
+<span class="lineno">   99 </span><span class="spaces">              </span><span class="istickedoff">anyUntil $ simpleNewline &lt;|&gt; eof</span>
+<span class="lineno">  100 </span><span class="spaces">            </span><span class="istickedoff">return $ LineComment comment</span>
+<span class="lineno">  101 </span><span class="spaces">        </span><span class="istickedoff">]</span></span>
+<span class="lineno">  102 </span>
+<span class="lineno">  103 </span>
+<span class="lineno">  104 </span>restOfLine :: IParser (Maybe String)
+<span class="lineno">  105 </span><span class="decl"><span class="istickedoff">restOfLine =</span>
+<span class="lineno">  106 </span><span class="spaces">    </span><span class="istickedoff">many (char ' ') *&gt;</span>
+<span class="lineno">  107 </span><span class="spaces">        </span><span class="istickedoff">choice</span>
+<span class="lineno">  108 </span><span class="spaces">            </span><span class="istickedoff">[ Just . fst &lt;$&gt; (try (string &quot;--&quot;) *&gt; (anyUntil $ (lookAhead simpleNewline) &lt;|&gt; eof))</span>
+<span class="lineno">  109 </span><span class="spaces">            </span><span class="istickedoff">, return Nothing</span>
+<span class="lineno">  110 </span><span class="spaces">            </span><span class="istickedoff">]</span></span>
+<span class="lineno">  111 </span>
+<span class="lineno">  112 </span>
+<span class="lineno">  113 </span>docComment :: IParser String
+<span class="lineno">  114 </span><span class="decl"><span class="istickedoff">docComment =</span>
+<span class="lineno">  115 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- try (string &quot;{-|&quot;)</span>
+<span class="lineno">  116 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- many (string &quot; &quot;)</span>
+<span class="lineno">  117 </span><span class="spaces">      </span><span class="istickedoff">closeComment False</span></span>
+<span class="lineno">  118 </span>
+<span class="lineno">  119 </span>
+<span class="lineno">  120 </span>docCommentAsMarkdown :: IParser Markdown.Blocks
+<span class="lineno">  121 </span><span class="decl"><span class="istickedoff">docCommentAsMarkdown =</span>
+<span class="lineno">  122 </span><span class="spaces">    </span><span class="istickedoff">Markdown.parse &lt;$&gt; docComment</span></span>
+<span class="lineno">  123 </span>
+<span class="lineno">  124 </span>
+<span class="lineno">  125 </span>multiComment :: IParser Comment
+<span class="lineno">  126 </span><span class="decl"><span class="istickedoff">multiComment =</span>
+<span class="lineno">  127 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- try (string &quot;{-&quot; &lt;* notFollowedBy (string &quot;|&quot;) )</span>
+<span class="lineno">  128 </span><span class="spaces">      </span><span class="istickedoff">isCommentTrick &lt;-</span>
+<span class="lineno">  129 </span><span class="spaces">        </span><span class="istickedoff">choice</span>
+<span class="lineno">  130 </span><span class="spaces">          </span><span class="istickedoff">[ char '-' &gt;&gt; return True</span>
+<span class="lineno">  131 </span><span class="spaces">          </span><span class="istickedoff">, return False</span>
+<span class="lineno">  132 </span><span class="spaces">          </span><span class="istickedoff">]</span>
+<span class="lineno">  133 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- many (string &quot; &quot;)</span>
+<span class="lineno">  134 </span><span class="spaces">      </span><span class="istickedoff">b &lt;- closeComment False</span>
+<span class="lineno">  135 </span><span class="spaces">      </span><span class="istickedoff">return $</span>
+<span class="lineno">  136 </span><span class="spaces">        </span><span class="istickedoff">if isCommentTrick then</span>
+<span class="lineno">  137 </span><span class="spaces">          </span><span class="istickedoff">CommentTrickBlock b</span>
+<span class="lineno">  138 </span><span class="spaces">        </span><span class="istickedoff">else</span>
+<span class="lineno">  139 </span><span class="spaces">          </span><span class="istickedoff">BlockComment $ trimIndent $ lines b</span>
+<span class="lineno">  140 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  141 </span><span class="spaces">      </span><span class="istickedoff">trimIndent [] = <span class="nottickedoff">[]</span></span>
+<span class="lineno">  142 </span><span class="spaces">      </span><span class="istickedoff">trimIndent (l1:ls) =</span>
+<span class="lineno">  143 </span><span class="spaces">          </span><span class="istickedoff">let</span>
+<span class="lineno">  144 </span><span class="spaces">              </span><span class="istickedoff">leadingIndents =</span>
+<span class="lineno">  145 </span><span class="spaces">                  </span><span class="istickedoff">map fst $ filter (uncurry (/=))</span>
+<span class="lineno">  146 </span><span class="spaces">                      </span><span class="istickedoff">$ map (\l -&gt; (length $ takeWhile Char.isSpace l, length l)) ls</span>
+<span class="lineno">  147 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  148 </span><span class="spaces">              </span><span class="istickedoff">depth =</span>
+<span class="lineno">  149 </span><span class="spaces">                  </span><span class="istickedoff">case leadingIndents of</span>
+<span class="lineno">  150 </span><span class="spaces">                      </span><span class="istickedoff">[] -&gt; 0</span>
+<span class="lineno">  151 </span><span class="spaces">                      </span><span class="istickedoff">_ -&gt; minimum leadingIndents</span>
+<span class="lineno">  152 </span><span class="spaces">          </span><span class="istickedoff">in</span>
+<span class="lineno">  153 </span><span class="spaces">              </span><span class="istickedoff">l1 : map (drop depth) ls</span></span>
+<span class="lineno">  154 </span>
+<span class="lineno">  155 </span>
+<span class="lineno">  156 </span>closeComment :: Bool -&gt; IParser String
+<span class="lineno">  157 </span><span class="decl"><span class="istickedoff">closeComment keepClosingPunc =</span>
+<span class="lineno">  158 </span><span class="spaces">  </span><span class="istickedoff">uncurry (++) &lt;$&gt;</span>
+<span class="lineno">  159 </span><span class="spaces">    </span><span class="istickedoff">anyUntil</span>
+<span class="lineno">  160 </span><span class="spaces">      </span><span class="istickedoff">(choice</span>
+<span class="lineno">  161 </span><span class="spaces">        </span><span class="istickedoff">[ try ((\a b -&gt; if keepClosingPunc then concat (a ++ [b]) else &quot;&quot;) &lt;$&gt; many (string &quot; &quot;) &lt;*&gt; string &quot;-}&quot;) &lt;?&gt; <span class="nottickedoff">&quot;the end of a comment -}&quot;</span></span>
+<span class="lineno">  162 </span><span class="spaces">        </span><span class="istickedoff">, concat &lt;$&gt; sequence [ try (string &quot;{-&quot;), closeComment True, closeComment keepClosingPunc]</span>
+<span class="lineno">  163 </span><span class="spaces">        </span><span class="istickedoff">])</span></span>
+<span class="lineno">  164 </span>
+<span class="lineno">  165 </span>
+<span class="lineno">  166 </span>anyUntil :: IParser a -&gt; IParser (String, a)
+<span class="lineno">  167 </span><span class="decl"><span class="istickedoff">anyUntil end =</span>
+<span class="lineno">  168 </span><span class="spaces">    </span><span class="istickedoff">go &quot;&quot;</span>
+<span class="lineno">  169 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  170 </span><span class="spaces">    </span><span class="istickedoff">next pre =</span>
+<span class="lineno">  171 </span><span class="spaces">      </span><span class="istickedoff">do</span>
+<span class="lineno">  172 </span><span class="spaces">        </span><span class="istickedoff">nextChar &lt;- anyChar</span>
+<span class="lineno">  173 </span><span class="spaces">        </span><span class="istickedoff">go (nextChar : pre)</span>
+<span class="lineno">  174 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  175 </span><span class="spaces">    </span><span class="istickedoff">go pre =</span>
+<span class="lineno">  176 </span><span class="spaces">      </span><span class="istickedoff">((,) (reverse pre) &lt;$&gt; end) &lt;|&gt; next pre</span></span>
+
+</pre>
+</body>
+</html>

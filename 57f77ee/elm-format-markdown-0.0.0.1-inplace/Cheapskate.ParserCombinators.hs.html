@@ -1,0 +1,345 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module Cheapskate.ParserCombinators (
+<span class="lineno">    2 </span>    Position(..)
+<span class="lineno">    3 </span>  , Parser
+<span class="lineno">    4 </span>  , parse
+<span class="lineno">    5 </span>  , (&lt;?&gt;)
+<span class="lineno">    6 </span>  , satisfy
+<span class="lineno">    7 </span>  , peekChar
+<span class="lineno">    8 </span>  , peekLastChar
+<span class="lineno">    9 </span>  , notAfter
+<span class="lineno">   10 </span>  , inClass
+<span class="lineno">   11 </span>  , notInClass
+<span class="lineno">   12 </span>  , endOfInput
+<span class="lineno">   13 </span>  , char
+<span class="lineno">   14 </span>  , anyChar
+<span class="lineno">   15 </span>  , getPosition
+<span class="lineno">   16 </span>  , setPosition
+<span class="lineno">   17 </span>  , takeWhile
+<span class="lineno">   18 </span>  , takeTill
+<span class="lineno">   19 </span>  , takeWhile1
+<span class="lineno">   20 </span>  , takeText
+<span class="lineno">   21 </span>  , skip
+<span class="lineno">   22 </span>  , skipWhile
+<span class="lineno">   23 </span>  , string
+<span class="lineno">   24 </span>  , scan
+<span class="lineno">   25 </span>  , lookAhead
+<span class="lineno">   26 </span>  , notFollowedBy
+<span class="lineno">   27 </span>  , option
+<span class="lineno">   28 </span>  , many1
+<span class="lineno">   29 </span>  , manyTill
+<span class="lineno">   30 </span>  , skipMany
+<span class="lineno">   31 </span>  , skipMany1
+<span class="lineno">   32 </span>  , count
+<span class="lineno">   33 </span>  ) where
+<span class="lineno">   34 </span>import Prelude hiding (takeWhile)
+<span class="lineno">   35 </span>import Data.Text (Text)
+<span class="lineno">   36 </span>import qualified Data.Text as T
+<span class="lineno">   37 </span>import Control.Monad
+<span class="lineno">   38 </span>import Control.Monad.Fail ()
+<span class="lineno">   39 </span>import Control.Applicative
+<span class="lineno">   40 </span>import qualified Data.Set as Set
+<span class="lineno">   41 </span>
+<span class="lineno">   42 </span>data Position = Position { <span class="istickedoff"><span class="decl"><span class="istickedoff">line</span></span></span> :: Int, <span class="istickedoff"><span class="decl"><span class="istickedoff">column</span></span></span> :: Int }
+<span class="lineno">   43 </span>     deriving (<span class="decl"><span class="nottickedoff"><span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Ord</span></span></span></span></span></span></span></span></span></span>, <span class="decl"><span class="nottickedoff">Eq</span></span>)
+<span class="lineno">   44 </span>
+<span class="lineno">   45 </span>instance Show Position where
+<span class="lineno">   46 </span>  <span class="decl"><span class="nottickedoff">show (Position ln cn) = &quot;line &quot; ++ show ln ++ &quot; column &quot; ++ show cn</span></span>
+<span class="lineno">   47 </span>
+<span class="lineno">   48 </span>-- the String indicates what the parser was expecting
+<span class="lineno">   49 </span>data ParseError = ParseError Position String deriving <span class="decl"><span class="nottickedoff">Show</span></span>
+<span class="lineno">   50 </span>
+<span class="lineno">   51 </span>data ParserState = ParserState { <span class="istickedoff"><span class="decl"><span class="istickedoff">subject</span></span></span>  :: Text
+<span class="lineno">   52 </span>                               , <span class="istickedoff"><span class="decl"><span class="istickedoff">position</span></span></span> :: Position
+<span class="lineno">   53 </span>                               , <span class="istickedoff"><span class="decl"><span class="istickedoff">lastChar</span></span></span> :: Maybe Char
+<span class="lineno">   54 </span>                               }
+<span class="lineno">   55 </span>
+<span class="lineno">   56 </span>advance :: ParserState -&gt; Text -&gt; ParserState
+<span class="lineno">   57 </span><span class="decl"><span class="istickedoff">advance = T.foldl' go</span>
+<span class="lineno">   58 </span><span class="spaces">  </span><span class="istickedoff">where go :: ParserState -&gt; Char -&gt; ParserState</span>
+<span class="lineno">   59 </span><span class="spaces">        </span><span class="istickedoff">go st c = st{ subject = T.drop 1 (subject st)</span>
+<span class="lineno">   60 </span><span class="spaces">                    </span><span class="istickedoff">, position = case c of</span>
+<span class="lineno">   61 </span><span class="spaces">                                      </span><span class="istickedoff">'\n' -&gt; Position { line =</span>
+<span class="lineno">   62 </span><span class="spaces">                                                  </span><span class="istickedoff">line (position st) + 1</span>
+<span class="lineno">   63 </span><span class="spaces">                                                  </span><span class="istickedoff">, column = 1 }</span>
+<span class="lineno">   64 </span><span class="spaces">                                      </span><span class="istickedoff">_    -&gt; Position { line =</span>
+<span class="lineno">   65 </span><span class="spaces">                                                  </span><span class="istickedoff">line (position st)</span>
+<span class="lineno">   66 </span><span class="spaces">                                                  </span><span class="istickedoff">, column =</span>
+<span class="lineno">   67 </span><span class="spaces">                                                  </span><span class="istickedoff">column (position st) + 1</span>
+<span class="lineno">   68 </span><span class="spaces">                                                  </span><span class="istickedoff">}</span>
+<span class="lineno">   69 </span><span class="spaces">                    </span><span class="istickedoff">, lastChar = Just c }</span></span>
+<span class="lineno">   70 </span>
+<span class="lineno">   71 </span>newtype Parser a = Parser {
+<span class="lineno">   72 </span>  <span class="istickedoff"><span class="decl"><span class="istickedoff">evalParser</span></span></span> :: ParserState -&gt; Either ParseError (ParserState, a)
+<span class="lineno">   73 </span>  }
+<span class="lineno">   74 </span>
+<span class="lineno">   75 </span>instance Functor Parser where
+<span class="lineno">   76 </span>  <span class="decl"><span class="istickedoff">fmap f (Parser g) = Parser $ \st -&gt;</span>
+<span class="lineno">   77 </span><span class="spaces">    </span><span class="istickedoff">case g st of</span>
+<span class="lineno">   78 </span><span class="spaces">         </span><span class="istickedoff">Right (st', x) -&gt; Right (st', f x)</span>
+<span class="lineno">   79 </span><span class="spaces">         </span><span class="istickedoff">Left e         -&gt; Left e</span></span>
+<span class="lineno">   80 </span>  {-# INLINE fmap #-}
+<span class="lineno">   81 </span>
+<span class="lineno">   82 </span>instance Applicative Parser where
+<span class="lineno">   83 </span>  <span class="decl"><span class="istickedoff">pure x = Parser $ \st -&gt; Right (st, x)</span></span>
+<span class="lineno">   84 </span>  <span class="decl"><span class="istickedoff">(Parser f) &lt;*&gt; (Parser g) = Parser $ \st -&gt;</span>
+<span class="lineno">   85 </span><span class="spaces">    </span><span class="istickedoff">case f st of</span>
+<span class="lineno">   86 </span><span class="spaces">         </span><span class="istickedoff">Left e         -&gt; Left e</span>
+<span class="lineno">   87 </span><span class="spaces">         </span><span class="istickedoff">Right (st', h) -&gt; case g st' of</span>
+<span class="lineno">   88 </span><span class="spaces">                                </span><span class="istickedoff">Right (st'', x) -&gt; Right (st'', h x)</span>
+<span class="lineno">   89 </span><span class="spaces">                                </span><span class="istickedoff">Left e          -&gt; Left e</span></span>
+<span class="lineno">   90 </span>  {-# INLINE pure #-}
+<span class="lineno">   91 </span>  {-# INLINE (&lt;*&gt;) #-}
+<span class="lineno">   92 </span>
+<span class="lineno">   93 </span>instance Alternative Parser where
+<span class="lineno">   94 </span>  <span class="decl"><span class="istickedoff">empty = Parser $ \st -&gt; Left $ ParseError (position st) <span class="nottickedoff">&quot;(empty)&quot;</span></span></span>
+<span class="lineno">   95 </span>  <span class="decl"><span class="istickedoff">(Parser f) &lt;|&gt; (Parser g) = Parser $ \st -&gt;</span>
+<span class="lineno">   96 </span><span class="spaces">    </span><span class="istickedoff">case f st of</span>
+<span class="lineno">   97 </span><span class="spaces">         </span><span class="istickedoff">Right res                 -&gt; Right res</span>
+<span class="lineno">   98 </span><span class="spaces">         </span><span class="istickedoff">Left (ParseError pos msg) -&gt;</span>
+<span class="lineno">   99 </span><span class="spaces">           </span><span class="istickedoff">case g st of</span>
+<span class="lineno">  100 </span><span class="spaces">             </span><span class="istickedoff">Right res                   -&gt; Right res</span>
+<span class="lineno">  101 </span><span class="spaces">             </span><span class="istickedoff">Left (ParseError pos' msg') -&gt; Left $</span>
+<span class="lineno">  102 </span><span class="spaces">               </span><span class="istickedoff">case <span class="nottickedoff">()</span> of</span>
+<span class="lineno">  103 </span><span class="spaces">                  </span><span class="istickedoff">-- return error for farthest match</span>
+<span class="lineno">  104 </span><span class="spaces">                  </span><span class="istickedoff">_ | pos' &gt; pos  -&gt; ParseError pos' <span class="nottickedoff">msg'</span></span>
+<span class="lineno">  105 </span><span class="spaces">                    </span><span class="istickedoff">| pos' &lt; pos  -&gt; ParseError pos <span class="nottickedoff">msg</span></span>
+<span class="lineno">  106 </span><span class="spaces">                    </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span> {- pos' == pos -}</span>
+<span class="lineno">  107 </span><span class="spaces">                                  </span><span class="istickedoff">-&gt; ParseError pos <span class="nottickedoff">(msg ++ &quot; or &quot; ++ msg')</span></span></span>
+<span class="lineno">  108 </span>  {-# INLINE empty #-}
+<span class="lineno">  109 </span>  {-# INLINE (&lt;|&gt;) #-}
+<span class="lineno">  110 </span>
+<span class="lineno">  111 </span>instance Monad Parser where
+<span class="lineno">  112 </span>  <span class="decl"><span class="istickedoff">return x = Parser $ \st -&gt; Right (st, x)</span></span>
+<span class="lineno">  113 </span>  <span class="decl"><span class="istickedoff">p &gt;&gt;= g = Parser $ \st -&gt;</span>
+<span class="lineno">  114 </span><span class="spaces">    </span><span class="istickedoff">case evalParser p st of</span>
+<span class="lineno">  115 </span><span class="spaces">         </span><span class="istickedoff">Left e        -&gt; Left e</span>
+<span class="lineno">  116 </span><span class="spaces">         </span><span class="istickedoff">Right (st',x) -&gt; evalParser (g x) st'</span></span>
+<span class="lineno">  117 </span>  {-# INLINE return #-}
+<span class="lineno">  118 </span>  {-# INLINE (&gt;&gt;=) #-}
+<span class="lineno">  119 </span>
+<span class="lineno">  120 </span>instance MonadFail Parser where
+<span class="lineno">  121 </span>  <span class="decl"><span class="nottickedoff">fail e = Parser $ \st -&gt; Left $ ParseError (position st) e</span></span>
+<span class="lineno">  122 </span>
+<span class="lineno">  123 </span>instance MonadPlus Parser where
+<span class="lineno">  124 </span>  <span class="decl"><span class="istickedoff">mzero = Parser $ \st -&gt; Left $ ParseError (position st) <span class="nottickedoff">&quot;(mzero)&quot;</span></span></span>
+<span class="lineno">  125 </span>  <span class="decl"><span class="nottickedoff">mplus p1 p2 = Parser $ \st -&gt;</span>
+<span class="lineno">  126 </span><span class="spaces">    </span><span class="nottickedoff">case evalParser p1 st of</span>
+<span class="lineno">  127 </span><span class="spaces">         </span><span class="nottickedoff">Right res  -&gt; Right res</span>
+<span class="lineno">  128 </span><span class="spaces">         </span><span class="nottickedoff">Left _     -&gt; evalParser p2 st</span></span>
+<span class="lineno">  129 </span>  {-# INLINE mzero #-}
+<span class="lineno">  130 </span>  {-# INLINE mplus #-}
+<span class="lineno">  131 </span>
+<span class="lineno">  132 </span>(&lt;?&gt;) :: Parser a -&gt; String -&gt; Parser a
+<span class="lineno">  133 </span><span class="decl"><span class="nottickedoff">p &lt;?&gt; msg = Parser $ \st -&gt;</span>
+<span class="lineno">  134 </span><span class="spaces">  </span><span class="nottickedoff">let startpos = position st in</span>
+<span class="lineno">  135 </span><span class="spaces">  </span><span class="nottickedoff">case evalParser p st of</span>
+<span class="lineno">  136 </span><span class="spaces">       </span><span class="nottickedoff">Left (ParseError _ _) -&gt;</span>
+<span class="lineno">  137 </span><span class="spaces">           </span><span class="nottickedoff">Left $ ParseError startpos msg</span>
+<span class="lineno">  138 </span><span class="spaces">       </span><span class="nottickedoff">Right r                 -&gt; Right r</span></span>
+<span class="lineno">  139 </span>{-# INLINE (&lt;?&gt;) #-}
+<span class="lineno">  140 </span>infixl 5 &lt;?&gt;
+<span class="lineno">  141 </span>
+<span class="lineno">  142 </span>parse :: Parser a -&gt; Text -&gt; Either ParseError a
+<span class="lineno">  143 </span><span class="decl"><span class="istickedoff">parse p t =</span>
+<span class="lineno">  144 </span><span class="spaces">  </span><span class="istickedoff">fmap snd $ evalParser p ParserState{ subject  = t</span>
+<span class="lineno">  145 </span><span class="spaces">                                     </span><span class="istickedoff">, position = Position 1 1</span>
+<span class="lineno">  146 </span><span class="spaces">                                     </span><span class="istickedoff">, lastChar = Nothing }</span></span>
+<span class="lineno">  147 </span>
+<span class="lineno">  148 </span>failure :: ParserState -&gt; String -&gt; Either ParseError (ParserState, a)
+<span class="lineno">  149 </span><span class="decl"><span class="istickedoff">failure st msg = Left $ ParseError (position st) <span class="nottickedoff">msg</span></span></span>
+<span class="lineno">  150 </span>{-# INLINE failure #-}
+<span class="lineno">  151 </span>
+<span class="lineno">  152 </span>success :: ParserState -&gt; a -&gt; Either ParseError (ParserState, a)
+<span class="lineno">  153 </span><span class="decl"><span class="istickedoff">success st x = Right (st, x)</span></span>
+<span class="lineno">  154 </span>{-# INLINE success #-}
+<span class="lineno">  155 </span>
+<span class="lineno">  156 </span>satisfy :: (Char -&gt; Bool) -&gt; Parser Char
+<span class="lineno">  157 </span><span class="decl"><span class="istickedoff">satisfy f = Parser g</span>
+<span class="lineno">  158 </span><span class="spaces">  </span><span class="istickedoff">where g st = case T.uncons (subject st) of</span>
+<span class="lineno">  159 </span><span class="spaces">                    </span><span class="istickedoff">Just (c, _) | f c -&gt;</span>
+<span class="lineno">  160 </span><span class="spaces">                         </span><span class="istickedoff">success (advance st (T.singleton c)) c</span>
+<span class="lineno">  161 </span><span class="spaces">                    </span><span class="istickedoff">_ -&gt; failure st <span class="nottickedoff">&quot;character meeting condition&quot;</span></span></span>
+<span class="lineno">  162 </span>{-# INLINE satisfy #-}
+<span class="lineno">  163 </span>
+<span class="lineno">  164 </span>peekChar :: Parser (Maybe Char)
+<span class="lineno">  165 </span><span class="decl"><span class="istickedoff">peekChar = Parser $ \st -&gt;</span>
+<span class="lineno">  166 </span><span class="spaces">             </span><span class="istickedoff">case T.uncons (subject st) of</span>
+<span class="lineno">  167 </span><span class="spaces">                  </span><span class="istickedoff">Just (c, _) -&gt; success st (Just c)</span>
+<span class="lineno">  168 </span><span class="spaces">                  </span><span class="istickedoff">Nothing     -&gt; success st Nothing</span></span>
+<span class="lineno">  169 </span>{-# INLINE peekChar #-}
+<span class="lineno">  170 </span>
+<span class="lineno">  171 </span>peekLastChar :: Parser (Maybe Char)
+<span class="lineno">  172 </span><span class="decl"><span class="istickedoff">peekLastChar = Parser $ \st -&gt; success st (lastChar st)</span></span>
+<span class="lineno">  173 </span>{-# INLINE peekLastChar #-}
+<span class="lineno">  174 </span>
+<span class="lineno">  175 </span>notAfter :: (Char -&gt; Bool) -&gt; Parser ()
+<span class="lineno">  176 </span><span class="decl"><span class="istickedoff">notAfter f = do</span>
+<span class="lineno">  177 </span><span class="spaces">  </span><span class="istickedoff">mbc &lt;- peekLastChar</span>
+<span class="lineno">  178 </span><span class="spaces">  </span><span class="istickedoff">case mbc of</span>
+<span class="lineno">  179 </span><span class="spaces">       </span><span class="istickedoff">Nothing -&gt; return <span class="nottickedoff">()</span></span>
+<span class="lineno">  180 </span><span class="spaces">       </span><span class="istickedoff">Just c  -&gt; if f c then mzero else return <span class="nottickedoff">()</span></span></span>
+<span class="lineno">  181 </span>
+<span class="lineno">  182 </span>-- low-grade version of attoparsec's:
+<span class="lineno">  183 </span>charClass :: String -&gt; Set.Set Char
+<span class="lineno">  184 </span><span class="decl"><span class="istickedoff">charClass = Set.fromList . go</span>
+<span class="lineno">  185 </span><span class="spaces">    </span><span class="istickedoff">where go (a:'-':b:xs) = <span class="nottickedoff">[a..b] ++ go xs</span></span>
+<span class="lineno">  186 </span><span class="spaces">          </span><span class="istickedoff">go (x:xs) = x : go xs</span>
+<span class="lineno">  187 </span><span class="spaces">          </span><span class="istickedoff">go _ = &quot;&quot;</span></span>
+<span class="lineno">  188 </span>{-# INLINE charClass #-}
+<span class="lineno">  189 </span>
+<span class="lineno">  190 </span>inClass :: String -&gt; Char -&gt; Bool
+<span class="lineno">  191 </span><span class="decl"><span class="istickedoff">inClass s c = c `Set.member` s'</span>
+<span class="lineno">  192 </span><span class="spaces">  </span><span class="istickedoff">where s' = charClass s</span></span>
+<span class="lineno">  193 </span>{-# INLINE inClass #-}
+<span class="lineno">  194 </span>
+<span class="lineno">  195 </span>notInClass :: String -&gt; Char -&gt; Bool
+<span class="lineno">  196 </span><span class="decl"><span class="istickedoff">notInClass s = not . inClass s</span></span>
+<span class="lineno">  197 </span>{-# INLINE notInClass #-}
+<span class="lineno">  198 </span>
+<span class="lineno">  199 </span>endOfInput :: Parser ()
+<span class="lineno">  200 </span><span class="decl"><span class="istickedoff">endOfInput = Parser $ \st -&gt;</span>
+<span class="lineno">  201 </span><span class="spaces">  </span><span class="istickedoff">if T.null (subject st)</span>
+<span class="lineno">  202 </span><span class="spaces">     </span><span class="istickedoff">then success st <span class="nottickedoff">()</span></span>
+<span class="lineno">  203 </span><span class="spaces">     </span><span class="istickedoff">else failure st <span class="nottickedoff">&quot;end of input&quot;</span></span></span>
+<span class="lineno">  204 </span>{-# INLINE endOfInput #-}
+<span class="lineno">  205 </span>
+<span class="lineno">  206 </span>char :: Char -&gt; Parser Char
+<span class="lineno">  207 </span><span class="decl"><span class="istickedoff">char c = satisfy (== c)</span></span>
+<span class="lineno">  208 </span>{-# INLINE char #-}
+<span class="lineno">  209 </span>
+<span class="lineno">  210 </span>anyChar :: Parser Char
+<span class="lineno">  211 </span><span class="decl"><span class="istickedoff">anyChar = satisfy (const True)</span></span>
+<span class="lineno">  212 </span>{-# INLINE anyChar #-}
+<span class="lineno">  213 </span>
+<span class="lineno">  214 </span>getPosition :: Parser Position
+<span class="lineno">  215 </span><span class="decl"><span class="istickedoff">getPosition = Parser $ \st -&gt; success st (position st)</span></span>
+<span class="lineno">  216 </span>{-# INLINE getPosition #-}
+<span class="lineno">  217 </span>
+<span class="lineno">  218 </span>-- note: this does not actually change the position in the subject;
+<span class="lineno">  219 </span>-- it only changes what column counts as column N.  It is intended
+<span class="lineno">  220 </span>-- to be used in cases where we're parsing a partial line but need to
+<span class="lineno">  221 </span>-- have accurate column information.
+<span class="lineno">  222 </span>setPosition :: Position -&gt; Parser ()
+<span class="lineno">  223 </span><span class="decl"><span class="istickedoff">setPosition pos = Parser $ \st -&gt; success st{ position = pos } <span class="nottickedoff">()</span></span></span>
+<span class="lineno">  224 </span>{-# INLINE setPosition #-}
+<span class="lineno">  225 </span>
+<span class="lineno">  226 </span>takeWhile :: (Char -&gt; Bool) -&gt; Parser Text
+<span class="lineno">  227 </span><span class="decl"><span class="istickedoff">takeWhile f = Parser $ \st -&gt;</span>
+<span class="lineno">  228 </span><span class="spaces">  </span><span class="istickedoff">let t = T.takeWhile f (subject st) in</span>
+<span class="lineno">  229 </span><span class="spaces">  </span><span class="istickedoff">success (advance st t) t</span></span>
+<span class="lineno">  230 </span>{-# INLINE takeWhile #-}
+<span class="lineno">  231 </span>
+<span class="lineno">  232 </span>takeTill :: (Char -&gt; Bool) -&gt; Parser Text
+<span class="lineno">  233 </span><span class="decl"><span class="nottickedoff">takeTill f = takeWhile (not . f)</span></span>
+<span class="lineno">  234 </span>{-# INLINE takeTill #-}
+<span class="lineno">  235 </span>
+<span class="lineno">  236 </span>takeWhile1 :: (Char -&gt; Bool) -&gt; Parser Text
+<span class="lineno">  237 </span><span class="decl"><span class="istickedoff">takeWhile1 f = Parser $ \st -&gt;</span>
+<span class="lineno">  238 </span><span class="spaces">  </span><span class="istickedoff">case T.takeWhile f (subject st) of</span>
+<span class="lineno">  239 </span><span class="spaces">       </span><span class="istickedoff">t | T.null t  -&gt; failure st <span class="nottickedoff">&quot;characters satisfying condition&quot;</span></span>
+<span class="lineno">  240 </span><span class="spaces">         </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span> -&gt; success (advance st t) t</span></span>
+<span class="lineno">  241 </span>{-# INLINE takeWhile1 #-}
+<span class="lineno">  242 </span>
+<span class="lineno">  243 </span>takeText :: Parser Text
+<span class="lineno">  244 </span><span class="decl"><span class="istickedoff">takeText = Parser $ \st -&gt;</span>
+<span class="lineno">  245 </span><span class="spaces">  </span><span class="istickedoff">let t = subject st in</span>
+<span class="lineno">  246 </span><span class="spaces">  </span><span class="istickedoff">success <span class="nottickedoff">(advance st t)</span> t</span></span>
+<span class="lineno">  247 </span>{-# INLINE takeText #-}
+<span class="lineno">  248 </span>
+<span class="lineno">  249 </span>skip :: (Char -&gt; Bool) -&gt; Parser ()
+<span class="lineno">  250 </span><span class="decl"><span class="istickedoff">skip f = Parser $ \st -&gt;</span>
+<span class="lineno">  251 </span><span class="spaces">  </span><span class="istickedoff">case T.uncons (subject st) of</span>
+<span class="lineno">  252 </span><span class="spaces">       </span><span class="istickedoff">Just (c,_) | f c -&gt; success (advance st (T.singleton c)) <span class="nottickedoff">()</span></span>
+<span class="lineno">  253 </span><span class="spaces">       </span><span class="istickedoff">_                -&gt; failure st <span class="nottickedoff">&quot;character satisfying condition&quot;</span></span></span>
+<span class="lineno">  254 </span>{-# INLINE skip #-}
+<span class="lineno">  255 </span>
+<span class="lineno">  256 </span>skipWhile :: (Char -&gt; Bool) -&gt; Parser ()
+<span class="lineno">  257 </span><span class="decl"><span class="istickedoff">skipWhile f = Parser $ \st -&gt;</span>
+<span class="lineno">  258 </span><span class="spaces">  </span><span class="istickedoff">let t' = T.takeWhile f (subject st) in</span>
+<span class="lineno">  259 </span><span class="spaces">  </span><span class="istickedoff">success (advance st t') <span class="nottickedoff">()</span></span></span>
+<span class="lineno">  260 </span>{-# INLINE skipWhile #-}
+<span class="lineno">  261 </span>
+<span class="lineno">  262 </span>string :: Text -&gt; Parser Text
+<span class="lineno">  263 </span><span class="decl"><span class="istickedoff">string s = Parser $ \st -&gt;</span>
+<span class="lineno">  264 </span><span class="spaces">  </span><span class="istickedoff">if s `T.isPrefixOf` (subject st)</span>
+<span class="lineno">  265 </span><span class="spaces">     </span><span class="istickedoff">then success (advance st s) <span class="nottickedoff">s</span></span>
+<span class="lineno">  266 </span><span class="spaces">     </span><span class="istickedoff">else failure st <span class="nottickedoff">&quot;string&quot;</span></span></span>
+<span class="lineno">  267 </span>{-# INLINE string #-}
+<span class="lineno">  268 </span>
+<span class="lineno">  269 </span>scan :: s -&gt; (s -&gt; Char -&gt; Maybe s) -&gt; Parser Text
+<span class="lineno">  270 </span><span class="decl"><span class="istickedoff">scan s0 f = Parser $ go s0 []</span>
+<span class="lineno">  271 </span><span class="spaces">  </span><span class="istickedoff">where go s cs st =</span>
+<span class="lineno">  272 </span><span class="spaces">         </span><span class="istickedoff">case T.uncons (subject st) of</span>
+<span class="lineno">  273 </span><span class="spaces">               </span><span class="istickedoff">Nothing        -&gt; finish st cs</span>
+<span class="lineno">  274 </span><span class="spaces">               </span><span class="istickedoff">Just (c, _)    -&gt; case f s c of</span>
+<span class="lineno">  275 </span><span class="spaces">                                  </span><span class="istickedoff">Just s' -&gt; go s' (c:cs)</span>
+<span class="lineno">  276 </span><span class="spaces">                                              </span><span class="istickedoff">(advance st (T.singleton c))</span>
+<span class="lineno">  277 </span><span class="spaces">                                  </span><span class="istickedoff">Nothing -&gt; finish st cs</span>
+<span class="lineno">  278 </span><span class="spaces">        </span><span class="istickedoff">finish st cs =</span>
+<span class="lineno">  279 </span><span class="spaces">            </span><span class="istickedoff">success st (T.pack (reverse cs))</span></span>
+<span class="lineno">  280 </span>{-# INLINE scan #-}
+<span class="lineno">  281 </span>
+<span class="lineno">  282 </span>lookAhead :: Parser a -&gt; Parser a
+<span class="lineno">  283 </span><span class="decl"><span class="istickedoff">lookAhead p = Parser $ \st -&gt;</span>
+<span class="lineno">  284 </span><span class="spaces">  </span><span class="istickedoff">case evalParser p st of</span>
+<span class="lineno">  285 </span><span class="spaces">       </span><span class="istickedoff">Right (_,x) -&gt; success st <span class="nottickedoff">x</span></span>
+<span class="lineno">  286 </span><span class="spaces">       </span><span class="istickedoff">Left _      -&gt; failure st <span class="nottickedoff">&quot;lookAhead&quot;</span></span></span>
+<span class="lineno">  287 </span>{-# INLINE lookAhead #-}
+<span class="lineno">  288 </span>
+<span class="lineno">  289 </span>notFollowedBy :: Parser a -&gt; Parser ()
+<span class="lineno">  290 </span><span class="decl"><span class="istickedoff">notFollowedBy p = Parser $ \st -&gt;</span>
+<span class="lineno">  291 </span><span class="spaces">  </span><span class="istickedoff">case evalParser p st of</span>
+<span class="lineno">  292 </span><span class="spaces">       </span><span class="istickedoff">Right (_,_) -&gt; failure st <span class="nottickedoff">&quot;notFollowedBy&quot;</span></span>
+<span class="lineno">  293 </span><span class="spaces">       </span><span class="istickedoff">Left _      -&gt; success st <span class="nottickedoff">()</span></span></span>
+<span class="lineno">  294 </span>{-# INLINE notFollowedBy #-}
+<span class="lineno">  295 </span>
+<span class="lineno">  296 </span>-- combinators (definitions borrowed from attoparsec)
+<span class="lineno">  297 </span>
+<span class="lineno">  298 </span>option :: Alternative f =&gt; a -&gt; f a -&gt; f a
+<span class="lineno">  299 </span><span class="decl"><span class="istickedoff">option x p = p &lt;|&gt; pure x</span></span>
+<span class="lineno">  300 </span>{-# INLINE option #-}
+<span class="lineno">  301 </span>
+<span class="lineno">  302 </span>many1 :: Alternative f =&gt; f a -&gt; f [a]
+<span class="lineno">  303 </span><span class="decl"><span class="nottickedoff">many1 p = liftA2 (:) p (many p)</span></span>
+<span class="lineno">  304 </span>{-# INLINE many1 #-}
+<span class="lineno">  305 </span>
+<span class="lineno">  306 </span>manyTill :: Alternative f =&gt; f a -&gt; f b -&gt; f [a]
+<span class="lineno">  307 </span><span class="decl"><span class="istickedoff">manyTill p end = go</span>
+<span class="lineno">  308 </span><span class="spaces">  </span><span class="istickedoff">where go = (end *&gt; pure []) &lt;|&gt; liftA2 (:) p go</span></span>
+<span class="lineno">  309 </span>{-# INLINE manyTill #-}
+<span class="lineno">  310 </span>
+<span class="lineno">  311 </span>skipMany :: Alternative f =&gt; f a -&gt; f ()
+<span class="lineno">  312 </span><span class="decl"><span class="nottickedoff">skipMany p = go</span>
+<span class="lineno">  313 </span><span class="spaces">  </span><span class="nottickedoff">where go = (p *&gt; go) &lt;|&gt; pure ()</span></span>
+<span class="lineno">  314 </span>{-# INLINE skipMany #-}
+<span class="lineno">  315 </span>
+<span class="lineno">  316 </span>skipMany1 :: Alternative f =&gt; f a -&gt; f ()
+<span class="lineno">  317 </span><span class="decl"><span class="nottickedoff">skipMany1 p = p *&gt; skipMany p</span></span>
+<span class="lineno">  318 </span>{-# INLINE skipMany1 #-}
+<span class="lineno">  319 </span>
+<span class="lineno">  320 </span>count :: Monad m =&gt; Int -&gt; m a -&gt; m [a]
+<span class="lineno">  321 </span><span class="decl"><span class="istickedoff">count n p = sequence (replicate n p)</span></span>
+<span class="lineno">  322 </span>{-# INLINE count #-}
+
+</pre>
+</body>
+</html>

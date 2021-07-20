@@ -1,0 +1,95 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DeriveDataTypeable #-}
+<span class="lineno">    2 </span>module Cheapskate.Types where
+<span class="lineno">    3 </span>import Data.Sequence (Seq)
+<span class="lineno">    4 </span>import Data.Text (Text)
+<span class="lineno">    5 </span>import qualified Data.Map as M
+<span class="lineno">    6 </span>import Data.Data
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>-- | Structured representation of a document.  The 'Options' affect
+<span class="lineno">    9 </span>-- how the document is rendered by `toHtml`.
+<span class="lineno">   10 </span>data Doc = Doc Options Blocks
+<span class="lineno">   11 </span>           deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span>, Typeable)
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>-- | Block-level elements.
+<span class="lineno">   14 </span>data Block = Para Inlines
+<span class="lineno">   15 </span>           | Header Int Inlines
+<span class="lineno">   16 </span>           | Blockquote Blocks
+<span class="lineno">   17 </span>           | List Bool ListType [Blocks]
+<span class="lineno">   18 </span>           | CodeBlock CodeAttr Text
+<span class="lineno">   19 </span>           | HtmlBlock Text
+<span class="lineno">   20 </span>           | HRule
+<span class="lineno">   21 </span>           | ReferencesBlock [(Text, Text, Text)]
+<span class="lineno">   22 </span>           | ElmDocs [[Text]]
+<span class="lineno">   23 </span>           deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span>, Typeable, <span class="decl"><span class="nottickedoff">Eq</span></span>)
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>-- | Attributes for fenced code blocks.  'codeLang' is the
+<span class="lineno">   26 </span>-- first word of the attribute line, 'codeInfo' is the rest.
+<span class="lineno">   27 </span>data CodeAttr = CodeAttr { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">codeLang</span></span></span> :: Text, <span class="nottickedoff"><span class="decl"><span class="nottickedoff">codeInfo</span></span></span> :: Text }
+<span class="lineno">   28 </span>              deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span>, Typeable, <span class="decl"><span class="nottickedoff">Eq</span></span>)
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>data ListType = Bullet Char | Numbered NumWrapper Int deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>,<span class="decl"><span class="nottickedoff">Show</span></span>,<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span></span></span>,Typeable)
+<span class="lineno">   31 </span>data NumWrapper = PeriodFollowing | ParenFollowing deriving (<span class="decl"><span class="istickedoff">Eq</span></span>,<span class="decl"><span class="nottickedoff">Show</span></span>,<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span></span></span>,Typeable)
+<span class="lineno">   32 </span>
+<span class="lineno">   33 </span>-- | Simple representation of HTML tag.
+<span class="lineno">   34 </span>data HtmlTagType = Opening Text | Closing Text | SelfClosing Text deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span>, Typeable)
+<span class="lineno">   35 </span>
+<span class="lineno">   36 </span>-- We operate with sequences instead of lists, because
+<span class="lineno">   37 </span>-- they allow more efficient appending on to the end.
+<span class="lineno">   38 </span>type Blocks = Seq Block
+<span class="lineno">   39 </span>
+<span class="lineno">   40 </span>-- | Inline elements.
+<span class="lineno">   41 </span>data Inline = Str Text
+<span class="lineno">   42 </span>            | Space
+<span class="lineno">   43 </span>            | SoftBreak
+<span class="lineno">   44 </span>            | LineBreak
+<span class="lineno">   45 </span>            | Emph Inlines
+<span class="lineno">   46 </span>            | Strong Inlines
+<span class="lineno">   47 </span>            | Code Text
+<span class="lineno">   48 </span>            | Link Inlines LinkTarget {- URL -} Text {- title -}
+<span class="lineno">   49 </span>            | Image Inlines Text {- URL -} Text {- title -}
+<span class="lineno">   50 </span>            | Entity Text
+<span class="lineno">   51 </span>            | RawHtml Text
+<span class="lineno">   52 </span>            deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span>, Typeable, <span class="decl"><span class="nottickedoff">Eq</span></span>)
+<span class="lineno">   53 </span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>data LinkTarget
+<span class="lineno">   56 </span>    = Url Text
+<span class="lineno">   57 </span>    | Ref Text
+<span class="lineno">   58 </span>    deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span></span></span>, <span class="decl"><span class="nottickedoff">Eq</span></span>)
+<span class="lineno">   59 </span>
+<span class="lineno">   60 </span>
+<span class="lineno">   61 </span>type Inlines = Seq Inline
+<span class="lineno">   62 </span>
+<span class="lineno">   63 </span>type ReferenceMap = M.Map Text (Text, Text)
+<span class="lineno">   64 </span>
+<span class="lineno">   65 </span>-- | Rendering and parsing options.
+<span class="lineno">   66 </span>data Options = Options{
+<span class="lineno">   67 </span>    <span class="nottickedoff"><span class="decl"><span class="nottickedoff">sanitize</span></span></span>           :: Bool  -- ^ Sanitize raw HTML, link/image attributes
+<span class="lineno">   68 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">allowRawHtml</span></span></span>       :: Bool  -- ^ Allow raw HTML (if false it gets escaped)
+<span class="lineno">   69 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">preserveHardBreaks</span></span></span> :: Bool  -- ^ Preserve hard line breaks in the source
+<span class="lineno">   70 </span>  , <span class="istickedoff"><span class="decl"><span class="istickedoff">debug</span></span></span>              :: Bool  -- ^ Print container structure for debugging
+<span class="lineno">   71 </span>  }
+<span class="lineno">   72 </span>  deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Data</span></span></span></span></span></span></span></span></span></span></span></span>, Typeable)
+
+</pre>
+</body>
+</html>

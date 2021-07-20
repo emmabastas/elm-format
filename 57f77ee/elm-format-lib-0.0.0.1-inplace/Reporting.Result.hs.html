@@ -1,0 +1,160 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module Reporting.Result where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import qualified Control.Monad as M
+<span class="lineno">    4 </span>import Control.Monad.Except (Except, runExcept)
+<span class="lineno">    5 </span>import Data.Coapplicative
+<span class="lineno">    6 </span>import qualified Reporting.Annotation as A
+<span class="lineno">    7 </span>import qualified Reporting.Region as R
+<span class="lineno">    8 </span>
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>-- TASK
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>data Result warning error result =
+<span class="lineno">   13 </span>    Result
+<span class="lineno">   14 </span>      [A.Located warning]
+<span class="lineno">   15 </span>      (RawResult [A.Located error] result)
+<span class="lineno">   16 </span>    deriving (<span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   17 </span>
+<span class="lineno">   18 </span>
+<span class="lineno">   19 </span>data RawResult e a
+<span class="lineno">   20 </span>    = Ok a
+<span class="lineno">   21 </span>    | Err e
+<span class="lineno">   22 </span>    deriving (<span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>-- HELPERS
+<span class="lineno">   26 </span>
+<span class="lineno">   27 </span>ok :: a -&gt; Result w e a
+<span class="lineno">   28 </span><span class="decl"><span class="istickedoff">ok value =</span>
+<span class="lineno">   29 </span><span class="spaces">  </span><span class="istickedoff">Result <span class="nottickedoff">[]</span> (Ok value)</span></span>
+<span class="lineno">   30 </span>
+<span class="lineno">   31 </span>
+<span class="lineno">   32 </span>throw :: R.Region -&gt; e -&gt; Result w e a
+<span class="lineno">   33 </span><span class="decl"><span class="istickedoff">throw region err =</span>
+<span class="lineno">   34 </span><span class="spaces">  </span><span class="istickedoff">Result <span class="nottickedoff">[]</span> (Err [A.A region <span class="nottickedoff">err</span>])</span></span>
+<span class="lineno">   35 </span>
+<span class="lineno">   36 </span>
+<span class="lineno">   37 </span>throwMany :: [A.Located e] -&gt; Result w e a
+<span class="lineno">   38 </span><span class="decl"><span class="nottickedoff">throwMany errors =</span>
+<span class="lineno">   39 </span><span class="spaces">  </span><span class="nottickedoff">Result [] (Err errors)</span></span>
+<span class="lineno">   40 </span>
+<span class="lineno">   41 </span>
+<span class="lineno">   42 </span>from :: (e -&gt; e') -&gt; Except [A.Located e] a -&gt; Result w e' a
+<span class="lineno">   43 </span><span class="decl"><span class="nottickedoff">from f except =</span>
+<span class="lineno">   44 </span><span class="spaces">  </span><span class="nottickedoff">case runExcept except of</span>
+<span class="lineno">   45 </span><span class="spaces">    </span><span class="nottickedoff">Right answer -&gt;</span>
+<span class="lineno">   46 </span><span class="spaces">        </span><span class="nottickedoff">ok answer</span>
+<span class="lineno">   47 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">   48 </span><span class="spaces">    </span><span class="nottickedoff">Left errors -&gt;</span>
+<span class="lineno">   49 </span><span class="spaces">        </span><span class="nottickedoff">throwMany (map (fmap f) errors)</span></span>
+<span class="lineno">   50 </span>
+<span class="lineno">   51 </span>
+<span class="lineno">   52 </span>mapError :: (e -&gt; e') -&gt; Result w e a -&gt; Result w e' a
+<span class="lineno">   53 </span><span class="decl"><span class="nottickedoff">mapError f (Result warnings rawResult) =</span>
+<span class="lineno">   54 </span><span class="spaces">  </span><span class="nottickedoff">Result warnings $</span>
+<span class="lineno">   55 </span><span class="spaces">    </span><span class="nottickedoff">case rawResult of</span>
+<span class="lineno">   56 </span><span class="spaces">      </span><span class="nottickedoff">Ok v -&gt;</span>
+<span class="lineno">   57 </span><span class="spaces">          </span><span class="nottickedoff">Ok v</span>
+<span class="lineno">   58 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">   59 </span><span class="spaces">      </span><span class="nottickedoff">Err msgs -&gt;</span>
+<span class="lineno">   60 </span><span class="spaces">          </span><span class="nottickedoff">Err (map (fmap f) msgs)</span></span>
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>
+<span class="lineno">   63 </span>warn :: R.Region -&gt; w -&gt; Result w e ()
+<span class="lineno">   64 </span><span class="decl"><span class="nottickedoff">warn region warning =</span>
+<span class="lineno">   65 </span><span class="spaces">  </span><span class="nottickedoff">Result [A.A region warning] (Ok ())</span></span>
+<span class="lineno">   66 </span>
+<span class="lineno">   67 </span>
+<span class="lineno">   68 </span>addWarnings :: [A.Located w] -&gt; Result w e a -&gt; Result w e a
+<span class="lineno">   69 </span><span class="decl"><span class="nottickedoff">addWarnings newWarnings (Result warnings rawResult) =</span>
+<span class="lineno">   70 </span><span class="spaces">  </span><span class="nottickedoff">Result (newWarnings ++ warnings) rawResult</span></span>
+<span class="lineno">   71 </span>
+<span class="lineno">   72 </span>
+<span class="lineno">   73 </span>destruct :: (e -&gt; b) -&gt; (a -&gt; b) -&gt; RawResult e a -&gt; b
+<span class="lineno">   74 </span><span class="decl"><span class="nottickedoff">destruct errFunc okFunc rawResult =</span>
+<span class="lineno">   75 </span><span class="spaces">  </span><span class="nottickedoff">case rawResult of</span>
+<span class="lineno">   76 </span><span class="spaces">    </span><span class="nottickedoff">Ok answer -&gt;</span>
+<span class="lineno">   77 </span><span class="spaces">        </span><span class="nottickedoff">okFunc answer</span>
+<span class="lineno">   78 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">   79 </span><span class="spaces">    </span><span class="nottickedoff">Err errors -&gt;</span>
+<span class="lineno">   80 </span><span class="spaces">        </span><span class="nottickedoff">errFunc errors</span></span>
+<span class="lineno">   81 </span>
+<span class="lineno">   82 </span>
+<span class="lineno">   83 </span>toMaybe :: Result w x a -&gt; Maybe a
+<span class="lineno">   84 </span><span class="decl"><span class="istickedoff">toMaybe (Result _ (Ok a)) = Just a</span>
+<span class="lineno">   85 </span><span class="spaces"></span><span class="istickedoff">toMaybe (Result _ (Err _)) = Nothing</span></span>
+<span class="lineno">   86 </span>
+<span class="lineno">   87 </span>
+<span class="lineno">   88 </span>toEither :: Result w x a -&gt; Either [x] a
+<span class="lineno">   89 </span><span class="decl"><span class="nottickedoff">toEither (Result _ (Ok a)) = Right a</span>
+<span class="lineno">   90 </span><span class="spaces"></span><span class="nottickedoff">toEither (Result _ (Err x)) = Left $ fmap extract x</span></span>
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>
+<span class="lineno">   93 </span>-- EXTRA FANCY HELPERS
+<span class="lineno">   94 </span>
+<span class="lineno">   95 </span>instance M.Functor (Result w e) where
+<span class="lineno">   96 </span>  <span class="decl"><span class="nottickedoff">fmap func (Result warnings rawResult) =</span>
+<span class="lineno">   97 </span><span class="spaces">      </span><span class="nottickedoff">case rawResult of</span>
+<span class="lineno">   98 </span><span class="spaces">        </span><span class="nottickedoff">Ok a -&gt;</span>
+<span class="lineno">   99 </span><span class="spaces">            </span><span class="nottickedoff">Result warnings (Ok (func a))</span>
+<span class="lineno">  100 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  101 </span><span class="spaces">        </span><span class="nottickedoff">Err msgs -&gt;</span>
+<span class="lineno">  102 </span><span class="spaces">            </span><span class="nottickedoff">Result warnings (Err msgs)</span></span>
+<span class="lineno">  103 </span>
+<span class="lineno">  104 </span>
+<span class="lineno">  105 </span>instance Applicative (Result w e) where
+<span class="lineno">  106 </span>  <span class="decl"><span class="nottickedoff">pure value =</span>
+<span class="lineno">  107 </span><span class="spaces">      </span><span class="nottickedoff">ok value</span></span>
+<span class="lineno">  108 </span>
+<span class="lineno">  109 </span>  <span class="decl"><span class="nottickedoff">(&lt;*&gt;) (Result warnings resultFunc) (Result warnings' resultVal) =</span>
+<span class="lineno">  110 </span><span class="spaces">      </span><span class="nottickedoff">Result (warnings ++ warnings') $</span>
+<span class="lineno">  111 </span><span class="spaces">          </span><span class="nottickedoff">case (resultFunc, resultVal) of</span>
+<span class="lineno">  112 </span><span class="spaces">            </span><span class="nottickedoff">(Ok func, Ok val) -&gt;</span>
+<span class="lineno">  113 </span><span class="spaces">                </span><span class="nottickedoff">Ok (func val)</span>
+<span class="lineno">  114 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  115 </span><span class="spaces">            </span><span class="nottickedoff">(Err msgs, Err msgs') -&gt;</span>
+<span class="lineno">  116 </span><span class="spaces">                </span><span class="nottickedoff">Err (msgs ++ msgs')</span>
+<span class="lineno">  117 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  118 </span><span class="spaces">            </span><span class="nottickedoff">(Err msgs, _) -&gt;</span>
+<span class="lineno">  119 </span><span class="spaces">                </span><span class="nottickedoff">Err msgs</span>
+<span class="lineno">  120 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  121 </span><span class="spaces">            </span><span class="nottickedoff">(_, Err msgs) -&gt;</span>
+<span class="lineno">  122 </span><span class="spaces">                </span><span class="nottickedoff">Err msgs</span></span>
+<span class="lineno">  123 </span>
+<span class="lineno">  124 </span>
+<span class="lineno">  125 </span>instance M.Monad (Result w e) where
+<span class="lineno">  126 </span>  <span class="decl"><span class="istickedoff">return value =</span>
+<span class="lineno">  127 </span><span class="spaces">      </span><span class="istickedoff">ok value</span></span>
+<span class="lineno">  128 </span>
+<span class="lineno">  129 </span>  <span class="decl"><span class="nottickedoff">(&gt;&gt;=) (Result warnings rawResult) callback =</span>
+<span class="lineno">  130 </span><span class="spaces">      </span><span class="nottickedoff">case rawResult of</span>
+<span class="lineno">  131 </span><span class="spaces">          </span><span class="nottickedoff">Err msg -&gt;</span>
+<span class="lineno">  132 </span><span class="spaces">              </span><span class="nottickedoff">Result warnings (Err msg)</span>
+<span class="lineno">  133 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  134 </span><span class="spaces">          </span><span class="nottickedoff">Ok value -&gt;</span>
+<span class="lineno">  135 </span><span class="spaces">              </span><span class="nottickedoff">let (Result warnings' rawResult') = callback value</span>
+<span class="lineno">  136 </span><span class="spaces">              </span><span class="nottickedoff">in</span>
+<span class="lineno">  137 </span><span class="spaces">                  </span><span class="nottickedoff">Result (warnings ++ warnings') rawResult'</span></span>
+
+</pre>
+</body>
+</html>

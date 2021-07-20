@@ -1,0 +1,137 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    2 </span>module Parse.Type where
+<span class="lineno">    3 </span>
+<span class="lineno">    4 </span>import Text.Parsec ((&lt;|&gt;), (&lt;?&gt;), char, many1, string, try, optionMaybe)
+<span class="lineno">    5 </span>
+<span class="lineno">    6 </span>import Parse.Helpers
+<span class="lineno">    7 </span>import Reporting.Annotation (Located)
+<span class="lineno">    8 </span>import qualified Reporting.Annotation as A
+<span class="lineno">    9 </span>import AST.V0_16
+<span class="lineno">   10 </span>import AST.Structure
+<span class="lineno">   11 </span>import Data.Coapplicative
+<span class="lineno">   12 </span>import qualified Data.Indexed as I
+<span class="lineno">   13 </span>import ElmVersion
+<span class="lineno">   14 </span>import Parse.IParser
+<span class="lineno">   15 </span>import Parse.Common
+<span class="lineno">   16 </span>
+<span class="lineno">   17 </span>
+<span class="lineno">   18 </span>tvar :: ElmVersion -&gt; IParser (FixAST Located typeRef ctorRef varRef 'TypeNK)
+<span class="lineno">   19 </span><span class="decl"><span class="istickedoff">tvar elmVersion =</span>
+<span class="lineno">   20 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation</span>
+<span class="lineno">   21 </span><span class="spaces">    </span><span class="istickedoff">(TypeVariable &lt;$&gt; lowVar elmVersion &lt;?&gt; <span class="nottickedoff">&quot;a type variable&quot;</span>)</span></span>
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>tuple :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'TypeNK)
+<span class="lineno">   25 </span><span class="decl"><span class="istickedoff">tuple elmVersion =</span>
+<span class="lineno">   26 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $ checkMultiline $</span>
+<span class="lineno">   27 </span><span class="spaces">  </span><span class="istickedoff">do  types &lt;- parens'' (withEol $ expr elmVersion)</span>
+<span class="lineno">   28 </span><span class="spaces">      </span><span class="istickedoff">return $</span>
+<span class="lineno">   29 </span><span class="spaces">          </span><span class="istickedoff">case types of</span>
+<span class="lineno">   30 </span><span class="spaces">              </span><span class="istickedoff">Left comments -&gt;</span>
+<span class="lineno">   31 </span><span class="spaces">                  </span><span class="istickedoff">\_ -&gt; UnitType comments</span>
+<span class="lineno">   32 </span><span class="spaces">              </span><span class="istickedoff">Right [] -&gt;</span>
+<span class="lineno">   33 </span><span class="spaces">                  </span><span class="istickedoff"><span class="nottickedoff">\_ -&gt; UnitType []</span></span>
+<span class="lineno">   34 </span><span class="spaces">              </span><span class="istickedoff">Right [C ([], []) (C Nothing t)] -&gt;</span>
+<span class="lineno">   35 </span><span class="spaces">                  </span><span class="istickedoff">\_ -&gt; extract $ I.unFix t</span>
+<span class="lineno">   36 </span><span class="spaces">              </span><span class="istickedoff">Right [C (pre, post) (C eol t)] -&gt;</span>
+<span class="lineno">   37 </span><span class="spaces">                  </span><span class="istickedoff">\_ -&gt; TypeParens $ C (pre, eolToComment eol ++ post) t</span>
+<span class="lineno">   38 </span><span class="spaces">              </span><span class="istickedoff">Right types' -&gt;</span>
+<span class="lineno">   39 </span><span class="spaces">                  </span><span class="istickedoff">TupleType $ fmap (\(C (pre, post) (C eol t)) -&gt; C (pre, post, eol) t) types'</span></span>
+<span class="lineno">   40 </span>
+<span class="lineno">   41 </span>
+<span class="lineno">   42 </span>record :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'TypeNK)
+<span class="lineno">   43 </span><span class="decl"><span class="istickedoff">record elmVersion =</span>
+<span class="lineno">   44 </span><span class="spaces">    </span><span class="istickedoff">fmap I.Fix $ addLocation $ brackets' $ checkMultiline $</span>
+<span class="lineno">   45 </span><span class="spaces">        </span><span class="istickedoff">do</span>
+<span class="lineno">   46 </span><span class="spaces">            </span><span class="istickedoff">base' &lt;- optionMaybe $ try (commented (lowVar elmVersion) &lt;* string &quot;|&quot;)</span>
+<span class="lineno">   47 </span><span class="spaces">            </span><span class="istickedoff">(fields', trailing) &lt;- sectionedGroup (pair (lowVar elmVersion) lenientHasType (expr elmVersion))</span>
+<span class="lineno">   48 </span><span class="spaces">            </span><span class="istickedoff">return $ RecordType base' fields' trailing</span></span>
+<span class="lineno">   49 </span>
+<span class="lineno">   50 </span>
+<span class="lineno">   51 </span>capTypeVar :: ElmVersion -&gt; IParser [UppercaseIdentifier]
+<span class="lineno">   52 </span><span class="decl"><span class="istickedoff">capTypeVar elmVersion =</span>
+<span class="lineno">   53 </span><span class="spaces">    </span><span class="istickedoff">dotSep1 (capVar elmVersion)</span></span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>
+<span class="lineno">   56 </span>constructor0 :: ElmVersion -&gt; IParser (TypeConstructor ([UppercaseIdentifier], UppercaseIdentifier))
+<span class="lineno">   57 </span><span class="decl"><span class="istickedoff">constructor0 elmVersion =</span>
+<span class="lineno">   58 </span><span class="spaces">  </span><span class="istickedoff">do  name &lt;- capTypeVar elmVersion</span>
+<span class="lineno">   59 </span><span class="spaces">      </span><span class="istickedoff">case reverse name of</span>
+<span class="lineno">   60 </span><span class="spaces">        </span><span class="istickedoff">[] -&gt; <span class="nottickedoff">error &quot;Impossible empty TypeConstructor name&quot;</span></span>
+<span class="lineno">   61 </span><span class="spaces">        </span><span class="istickedoff">last':rest' -&gt;</span>
+<span class="lineno">   62 </span><span class="spaces">            </span><span class="istickedoff">return (NamedConstructor (reverse rest', last'))</span></span>
+<span class="lineno">   63 </span>
+<span class="lineno">   64 </span>
+<span class="lineno">   65 </span>constructor0' :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'TypeNK)
+<span class="lineno">   66 </span><span class="decl"><span class="istickedoff">constructor0' elmVersion =</span>
+<span class="lineno">   67 </span><span class="spaces">    </span><span class="istickedoff">fmap I.Fix $ addLocation $ checkMultiline $</span>
+<span class="lineno">   68 </span><span class="spaces">    </span><span class="istickedoff">do  ctor &lt;- constructor0 elmVersion</span>
+<span class="lineno">   69 </span><span class="spaces">        </span><span class="istickedoff">return (TypeConstruction ctor [])</span></span>
+<span class="lineno">   70 </span>
+<span class="lineno">   71 </span>
+<span class="lineno">   72 </span>term :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'TypeNK)
+<span class="lineno">   73 </span><span class="decl"><span class="istickedoff">term elmVersion =</span>
+<span class="lineno">   74 </span><span class="spaces">  </span><span class="istickedoff">tuple elmVersion &lt;|&gt; record elmVersion &lt;|&gt; tvar elmVersion &lt;|&gt; constructor0' elmVersion</span></span>
+<span class="lineno">   75 </span>
+<span class="lineno">   76 </span>
+<span class="lineno">   77 </span>tupleCtor :: IParser (TypeConstructor ns)
+<span class="lineno">   78 </span><span class="decl"><span class="istickedoff">tupleCtor =</span>
+<span class="lineno">   79 </span><span class="spaces">    </span><span class="istickedoff">do  ctor &lt;- parens' (many1 (char ','))</span>
+<span class="lineno">   80 </span><span class="spaces">        </span><span class="istickedoff">return (TupleConstructor (length ctor + 1))</span></span>
+<span class="lineno">   81 </span>
+<span class="lineno">   82 </span>
+<span class="lineno">   83 </span>app :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'TypeNK)
+<span class="lineno">   84 </span><span class="decl"><span class="istickedoff">app elmVersion =</span>
+<span class="lineno">   85 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $ checkMultiline $</span>
+<span class="lineno">   86 </span><span class="spaces">  </span><span class="istickedoff">do  f &lt;- constructor0 elmVersion &lt;|&gt; try tupleCtor &lt;?&gt; <span class="nottickedoff">&quot;a type constructor&quot;</span></span>
+<span class="lineno">   87 </span><span class="spaces">      </span><span class="istickedoff">args &lt;- spacePrefix (term elmVersion)</span>
+<span class="lineno">   88 </span><span class="spaces">      </span><span class="istickedoff">return $ TypeConstruction f args</span></span>
+<span class="lineno">   89 </span>
+<span class="lineno">   90 </span>
+<span class="lineno">   91 </span>expr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'TypeNK)
+<span class="lineno">   92 </span><span class="decl"><span class="istickedoff">expr elmVersion =</span>
+<span class="lineno">   93 </span><span class="spaces">  </span><span class="istickedoff">do</span>
+<span class="lineno">   94 </span><span class="spaces">    </span><span class="istickedoff">result &lt;- separated rightArrow (app elmVersion &lt;|&gt; term elmVersion)</span>
+<span class="lineno">   95 </span><span class="spaces">    </span><span class="istickedoff">return $</span>
+<span class="lineno">   96 </span><span class="spaces">      </span><span class="istickedoff">case result of</span>
+<span class="lineno">   97 </span><span class="spaces">        </span><span class="istickedoff">Left t -&gt;</span>
+<span class="lineno">   98 </span><span class="spaces">          </span><span class="istickedoff">t</span>
+<span class="lineno">   99 </span><span class="spaces">        </span><span class="istickedoff">Right (region, first', rest', multiline) -&gt;</span>
+<span class="lineno">  100 </span><span class="spaces">          </span><span class="istickedoff">I.Fix $ A.A region $ FunctionType first' rest' (ForceMultiline multiline)</span></span>
+<span class="lineno">  101 </span>
+<span class="lineno">  102 </span>
+<span class="lineno">  103 </span>-- TODO: can this be removed?  (tag is the new name?)
+<span class="lineno">  104 </span>constructor :: ElmVersion -&gt; IParser ([UppercaseIdentifier], [C1 before (ASTNS Located [UppercaseIdentifier] 'TypeNK)])
+<span class="lineno">  105 </span><span class="decl"><span class="nottickedoff">constructor elmVersion =</span>
+<span class="lineno">  106 </span><span class="spaces">  </span><span class="nottickedoff">(,) &lt;$&gt; (capTypeVar elmVersion&lt;?&gt; &quot;another type constructor&quot;)</span>
+<span class="lineno">  107 </span><span class="spaces">      </span><span class="nottickedoff">&lt;*&gt; spacePrefix (term elmVersion)</span></span>
+<span class="lineno">  108 </span>
+<span class="lineno">  109 </span>
+<span class="lineno">  110 </span>tag :: ElmVersion -&gt; IParser (NameWithArgs UppercaseIdentifier (ASTNS Located [UppercaseIdentifier] 'TypeNK))
+<span class="lineno">  111 </span><span class="decl"><span class="istickedoff">tag elmVersion =</span>
+<span class="lineno">  112 </span><span class="spaces">  </span><span class="istickedoff">NameWithArgs</span>
+<span class="lineno">  113 </span><span class="spaces">      </span><span class="istickedoff">&lt;$&gt; (capVar elmVersion &lt;?&gt; <span class="nottickedoff">&quot;another type constructor&quot;</span>)</span>
+<span class="lineno">  114 </span><span class="spaces">      </span><span class="istickedoff">&lt;*&gt; spacePrefix (term elmVersion)</span></span>
+
+</pre>
+</body>
+</html>

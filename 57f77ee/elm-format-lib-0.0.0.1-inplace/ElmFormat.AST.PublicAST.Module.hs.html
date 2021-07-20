@@ -1,0 +1,273 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    2 </span>{-# LANGUAGE DeriveGeneric #-}
+<span class="lineno">    3 </span>{-# LANGUAGE TypeFamilies #-}
+<span class="lineno">    4 </span>{-# LANGUAGE PolyKinds #-}
+<span class="lineno">    5 </span>module ElmFormat.AST.PublicAST.Module (Module(..), fromModule, toModule) where
+<span class="lineno">    6 </span>
+<span class="lineno">    7 </span>import ElmFormat.AST.PublicAST.Core
+<span class="lineno">    8 </span>import ElmFormat.AST.PublicAST.Comment
+<span class="lineno">    9 </span>import ElmFormat.AST.PublicAST.Expression
+<span class="lineno">   10 </span>import ElmFormat.AST.PublicAST.Type
+<span class="lineno">   11 </span>import qualified AST.V0_16 as AST
+<span class="lineno">   12 </span>import qualified AST.Module as AST
+<span class="lineno">   13 </span>import qualified AST.Listing as AST
+<span class="lineno">   14 </span>import Data.Map.Strict (Map)
+<span class="lineno">   15 </span>import qualified Data.Maybe as Maybe
+<span class="lineno">   16 </span>import qualified ElmFormat.ImportInfo as ImportInfo
+<span class="lineno">   17 </span>import qualified Data.Map.Strict as Map
+<span class="lineno">   18 </span>import qualified Data.Indexed as I
+<span class="lineno">   19 </span>import AST.MatchReferences (fromMatched, matchReferences)
+<span class="lineno">   20 </span>import Data.Text (Text)
+<span class="lineno">   21 </span>import qualified Data.Either as Either
+<span class="lineno">   22 </span>import qualified Data.Text as Text
+<span class="lineno">   23 </span>import Data.Maybe (fromMaybe)
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>
+<span class="lineno">   26 </span>data Module
+<span class="lineno">   27 </span>    = Module
+<span class="lineno">   28 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">moduleName</span></span></span> :: ModuleName
+<span class="lineno">   29 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">imports</span></span></span> :: Map ModuleName Import
+<span class="lineno">   30 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">body</span></span></span> :: List (MaybeF LocatedIfRequested TopLevelStructure)
+<span class="lineno">   31 </span>        }
+<span class="lineno">   32 </span>
+<span class="lineno">   33 </span>fromModule :: Config -&gt; AST.Module [UppercaseIdentifier] (ASTNS Located [UppercaseIdentifier] 'TopLevelNK) -&gt; Module
+<span class="lineno">   34 </span><span class="decl"><span class="istickedoff">fromModule config = \case</span>
+<span class="lineno">   35 </span><span class="spaces">    </span><span class="istickedoff">modu@(AST.Module _ maybeHeader _ (C _ imports) body) -&gt;</span>
+<span class="lineno">   36 </span><span class="spaces">        </span><span class="istickedoff">let</span>
+<span class="lineno">   37 </span><span class="spaces">            </span><span class="istickedoff">header =</span>
+<span class="lineno">   38 </span><span class="spaces">                </span><span class="istickedoff">Maybe.fromMaybe <span class="nottickedoff">AST.defaultHeader</span> maybeHeader</span>
+<span class="lineno">   39 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   40 </span><span class="spaces">            </span><span class="istickedoff">(AST.Header _ (C _ name) _ _) = header</span>
+<span class="lineno">   41 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   42 </span><span class="spaces">            </span><span class="istickedoff">importInfo =</span>
+<span class="lineno">   43 </span><span class="spaces">                </span><span class="istickedoff">ImportInfo.fromModule mempty modu</span>
+<span class="lineno">   44 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   45 </span><span class="spaces">            </span><span class="istickedoff">normalize =</span>
+<span class="lineno">   46 </span><span class="spaces">                </span><span class="istickedoff">mapNs (fromMatched []) . matchReferences importInfo</span>
+<span class="lineno">   47 </span><span class="spaces">        </span><span class="istickedoff">in</span>
+<span class="lineno">   48 </span><span class="spaces">        </span><span class="istickedoff">Module</span>
+<span class="lineno">   49 </span><span class="spaces">            </span><span class="istickedoff">(ModuleName name)</span>
+<span class="lineno">   50 </span><span class="spaces">            </span><span class="istickedoff">(Map.mapWithKey (\m (C comments i) -&gt; fromImportMethod m i) $ Map.mapKeys ModuleName imports)</span>
+<span class="lineno">   51 </span><span class="spaces">            </span><span class="istickedoff">(fromTopLevelStructures config $ normalize body)</span></span>
+<span class="lineno">   52 </span>
+<span class="lineno">   53 </span>toModule :: Module -&gt; AST.Module [UppercaseIdentifier] (ASTNS Identity [UppercaseIdentifier] 'TopLevelNK)
+<span class="lineno">   54 </span><span class="decl"><span class="istickedoff">toModule (Module (ModuleName name) imports body) =</span>
+<span class="lineno">   55 </span><span class="spaces">    </span><span class="istickedoff">-- TODO: remove this placeholder</span>
+<span class="lineno">   56 </span><span class="spaces">    </span><span class="istickedoff">AST.Module</span>
+<span class="lineno">   57 </span><span class="spaces">        </span><span class="istickedoff">[]</span>
+<span class="lineno">   58 </span><span class="spaces">        </span><span class="istickedoff">(Just $ AST.Header</span>
+<span class="lineno">   59 </span><span class="spaces">            </span><span class="istickedoff">AST.Normal</span>
+<span class="lineno">   60 </span><span class="spaces">            </span><span class="istickedoff">(C ([], []) name)</span>
+<span class="lineno">   61 </span><span class="spaces">            </span><span class="istickedoff">Nothing</span>
+<span class="lineno">   62 </span><span class="spaces">            </span><span class="istickedoff">Nothing</span>
+<span class="lineno">   63 </span><span class="spaces">        </span><span class="istickedoff">)</span>
+<span class="lineno">   64 </span><span class="spaces">        </span><span class="istickedoff">(noRegion Nothing)</span>
+<span class="lineno">   65 </span><span class="spaces">        </span><span class="istickedoff">(C [] $ Map.mapKeys (\(ModuleName ns) -&gt; ns) $ C [] . toImportMethod &lt;$&gt; imports)</span>
+<span class="lineno">   66 </span><span class="spaces">        </span><span class="istickedoff">(f $ AST.TopLevel $ mconcat $ fmap (toTopLevelStructures . extract) body)</span>
+<span class="lineno">   67 </span><span class="spaces">    </span><span class="istickedoff">where</span>
+<span class="lineno">   68 </span><span class="spaces">        </span><span class="istickedoff">f = I.Fix . Identity</span></span>
+<span class="lineno">   69 </span>
+<span class="lineno">   70 </span>instance ToJSON Module where
+<span class="lineno">   71 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">   72 </span>    <span class="decl"><span class="istickedoff">toEncoding = \case</span>
+<span class="lineno">   73 </span><span class="spaces">        </span><span class="istickedoff">Module moduleName imports body -&gt;</span>
+<span class="lineno">   74 </span><span class="spaces">            </span><span class="istickedoff">pairs $ mconcat</span>
+<span class="lineno">   75 </span><span class="spaces">                </span><span class="istickedoff">[ &quot;moduleName&quot; .= moduleName</span>
+<span class="lineno">   76 </span><span class="spaces">                </span><span class="istickedoff">, &quot;imports&quot; .= imports</span>
+<span class="lineno">   77 </span><span class="spaces">                </span><span class="istickedoff">, &quot;body&quot; .= body</span>
+<span class="lineno">   78 </span><span class="spaces">                </span><span class="istickedoff">]</span></span>
+<span class="lineno">   79 </span>
+<span class="lineno">   80 </span>instance FromJSON Module where
+<span class="lineno">   81 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;Module&quot;</span> $ \obj -&gt;</span>
+<span class="lineno">   82 </span><span class="spaces">        </span><span class="istickedoff">(\moduleName makeImports -&gt; Module moduleName (Map.mapWithKey (\importModuleName makeImport -&gt; makeImport importModuleName) makeImports))</span>
+<span class="lineno">   83 </span><span class="spaces">            </span><span class="istickedoff">&lt;$&gt; obj .: &quot;moduleName&quot;</span>
+<span class="lineno">   84 </span><span class="spaces">            </span><span class="istickedoff">&lt;*&gt; obj .:? &quot;imports&quot; .!= mempty</span>
+<span class="lineno">   85 </span><span class="spaces">            </span><span class="istickedoff">&lt;*&gt; obj .: &quot;body&quot;</span></span>
+<span class="lineno">   86 </span>
+<span class="lineno">   87 </span>
+<span class="lineno">   88 </span>data Import
+<span class="lineno">   89 </span>    = Import
+<span class="lineno">   90 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">as</span></span></span> :: ModuleName
+<span class="lineno">   91 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">exposing</span></span></span> :: AST.Listing AST.DetailedListing
+<span class="lineno">   92 </span>        }
+<span class="lineno">   93 </span>    deriving (Generic)
+<span class="lineno">   94 </span>
+<span class="lineno">   95 </span>fromImportMethod :: ModuleName -&gt; AST.ImportMethod -&gt; Import
+<span class="lineno">   96 </span><span class="decl"><span class="istickedoff">fromImportMethod moduleName (AST.ImportMethod alias (C comments exposing)) =</span>
+<span class="lineno">   97 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   98 </span><span class="spaces">        </span><span class="istickedoff">as_ =</span>
+<span class="lineno">   99 </span><span class="spaces">            </span><span class="istickedoff">case alias of</span>
+<span class="lineno">  100 </span><span class="spaces">                </span><span class="istickedoff">Nothing -&gt; moduleName</span>
+<span class="lineno">  101 </span><span class="spaces">                </span><span class="istickedoff">Just (C c a) -&gt; ModuleName [ a ]</span>
+<span class="lineno">  102 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  103 </span><span class="spaces">    </span><span class="istickedoff">Import as_ exposing</span></span>
+<span class="lineno">  104 </span>
+<span class="lineno">  105 </span>toImportMethod :: Import -&gt; AST.ImportMethod
+<span class="lineno">  106 </span><span class="decl"><span class="istickedoff">toImportMethod (Import alias exposing) =</span>
+<span class="lineno">  107 </span><span class="spaces">    </span><span class="istickedoff">AST.ImportMethod</span>
+<span class="lineno">  108 </span><span class="spaces">        </span><span class="istickedoff">(case alias of</span>
+<span class="lineno">  109 </span><span class="spaces">            </span><span class="istickedoff">ModuleName [single] -&gt;</span>
+<span class="lineno">  110 </span><span class="spaces">                </span><span class="istickedoff">Just $ C ([], []) single</span>
+<span class="lineno">  111 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  112 </span><span class="spaces">                </span><span class="istickedoff">Nothing</span>
+<span class="lineno">  113 </span><span class="spaces">        </span><span class="istickedoff">)</span>
+<span class="lineno">  114 </span><span class="spaces">        </span><span class="istickedoff">(C ([], []) exposing)</span></span>
+<span class="lineno">  115 </span>
+<span class="lineno">  116 </span>instance ToJSON Import where
+<span class="lineno">  117 </span>    <span class="decl"><span class="istickedoff">toEncoding = genericToEncoding defaultOptions</span></span>
+<span class="lineno">  118 </span>
+<span class="lineno">  119 </span>instance FromJSON (ModuleName -&gt; Import) where
+<span class="lineno">  120 </span>    -- This results in a function that when given that actual name of the module, returns the Import
+<span class="lineno">  121 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;Import&quot;</span> $ \obj -&gt;</span>
+<span class="lineno">  122 </span><span class="spaces">        </span><span class="istickedoff">(\makeAs exposing moduleName -&gt; Import (makeAs moduleName) exposing)</span>
+<span class="lineno">  123 </span><span class="spaces">            </span><span class="istickedoff">&lt;$&gt; (fmap const &lt;$&gt; obj .:? &quot;as&quot;) .!= id</span>
+<span class="lineno">  124 </span><span class="spaces">            </span><span class="istickedoff">&lt;*&gt; obj .:? &quot;exposing&quot; .!= AST.ClosedListing</span></span>
+<span class="lineno">  125 </span>
+<span class="lineno">  126 </span>
+<span class="lineno">  127 </span>data TopLevelStructure
+<span class="lineno">  128 </span>    = DefinitionStructure Definition
+<span class="lineno">  129 </span>    | TypeAlias
+<span class="lineno">  130 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">name_ta</span></span></span> :: UppercaseIdentifier
+<span class="lineno">  131 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">parameters_ta</span></span></span> :: List LowercaseIdentifier
+<span class="lineno">  132 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">type_ta</span></span></span> :: LocatedIfRequested Type_
+<span class="lineno">  133 </span>        }
+<span class="lineno">  134 </span>    | CustomType
+<span class="lineno">  135 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">name_ct</span></span></span> :: UppercaseIdentifier
+<span class="lineno">  136 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">parameters_ct</span></span></span> :: List LowercaseIdentifier
+<span class="lineno">  137 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">variants</span></span></span> :: List CustomTypeVariant
+<span class="lineno">  138 </span>        }
+<span class="lineno">  139 </span>    | Comment_tls Comment
+<span class="lineno">  140 </span>    | TODO_TopLevelStructure String
+<span class="lineno">  141 </span>
+<span class="lineno">  142 </span>fromTopLevelStructures :: Config -&gt; ASTNS Located [UppercaseIdentifier] 'TopLevelNK -&gt; List (MaybeF LocatedIfRequested TopLevelStructure)
+<span class="lineno">  143 </span><span class="decl"><span class="istickedoff">fromTopLevelStructures config (I.Fix (A _ (AST.TopLevel decls))) =</span>
+<span class="lineno">  144 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  145 </span><span class="spaces">        </span><span class="istickedoff">toDefBuilder :: AST.TopLevelStructure</span>
+<span class="lineno">  146 </span><span class="spaces">                     </span><span class="istickedoff">(ASTNS Located [UppercaseIdentifier] 'TopLevelDeclarationNK) -&gt; MaybeF LocatedIfRequested (DefinitionBuilder TopLevelStructure)</span>
+<span class="lineno">  147 </span><span class="spaces">        </span><span class="istickedoff">toDefBuilder decl =</span>
+<span class="lineno">  148 </span><span class="spaces">            </span><span class="istickedoff">case fmap I.unFix decl of</span>
+<span class="lineno">  149 </span><span class="spaces">                </span><span class="istickedoff">AST.Entry (A region entry) -&gt;</span>
+<span class="lineno">  150 </span><span class="spaces">                    </span><span class="istickedoff">JustF $ fromLocated config $ A region $</span>
+<span class="lineno">  151 </span><span class="spaces">                    </span><span class="istickedoff">case entry of</span>
+<span class="lineno">  152 </span><span class="spaces">                        </span><span class="istickedoff">AST.CommonDeclaration (I.Fix (A _ def)) -&gt;</span>
+<span class="lineno">  153 </span><span class="spaces">                            </span><span class="istickedoff">Right def</span>
+<span class="lineno">  154 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  155 </span><span class="spaces">                        </span><span class="istickedoff">AST.TypeAlias c1 (C (c2, c3) (AST.NameWithArgs name args)) (C c4 t) -&gt;</span>
+<span class="lineno">  156 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  157 </span><span class="spaces">                            </span><span class="istickedoff">Left $ TypeAlias name (fmap (\(C c a) -&gt; a) args) (fromRawAST config t)</span>
+<span class="lineno">  158 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  159 </span><span class="spaces">                        </span><span class="istickedoff">AST.Datatype (C (c1, c2) (AST.NameWithArgs name args)) variants -&gt;</span>
+<span class="lineno">  160 </span><span class="spaces">                            </span><span class="istickedoff">Left $ CustomType</span>
+<span class="lineno">  161 </span><span class="spaces">                                </span><span class="istickedoff">name</span>
+<span class="lineno">  162 </span><span class="spaces">                                </span><span class="istickedoff">((\(C c a) -&gt; a) &lt;$&gt; args)</span>
+<span class="lineno">  163 </span><span class="spaces">                                </span><span class="istickedoff">((\(C c a) -&gt; mkCustomTypeVariant config a) &lt;$&gt; AST.toCommentedList variants)</span>
+<span class="lineno">  164 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  165 </span><span class="spaces">                        </span><span class="istickedoff">other -&gt;</span>
+<span class="lineno">  166 </span><span class="spaces">                            </span><span class="istickedoff"><span class="nottickedoff">Left $ TODO_TopLevelStructure (&quot;TODO: &quot; ++ show other)</span></span>
+<span class="lineno">  167 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  168 </span><span class="spaces">                </span><span class="istickedoff">AST.BodyComment comment -&gt;</span>
+<span class="lineno">  169 </span><span class="spaces">                    </span><span class="istickedoff">NothingF $ Left $ Comment_tls (mkComment comment)</span>
+<span class="lineno">  170 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  171 </span><span class="spaces">                </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  172 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">NothingF $ Left $</span></span>
+<span class="lineno">  173 </span><span class="spaces">                        </span><span class="istickedoff"><span class="nottickedoff">TODO_TopLevelStructure (&quot;TODO: &quot; ++ show decl)</span></span>
+<span class="lineno">  174 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  175 </span><span class="spaces">    </span><span class="istickedoff">mkDefinitions config DefinitionStructure $ fmap toDefBuilder decls</span></span>
+<span class="lineno">  176 </span>
+<span class="lineno">  177 </span>toTopLevelStructures :: TopLevelStructure -&gt; List (AST.TopLevelStructure (ASTNS Identity [UppercaseIdentifier] 'TopLevelDeclarationNK))
+<span class="lineno">  178 </span><span class="decl"><span class="istickedoff">toTopLevelStructures = \case</span>
+<span class="lineno">  179 </span><span class="spaces">    </span><span class="istickedoff">DefinitionStructure def -&gt;</span>
+<span class="lineno">  180 </span><span class="spaces">        </span><span class="istickedoff">AST.Entry . I.Fix . Identity . AST.CommonDeclaration &lt;$&gt; fromDefinition def</span>
+<span class="lineno">  181 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  182 </span><span class="spaces">    </span><span class="istickedoff">TypeAlias name parameters typ -&gt;</span>
+<span class="lineno">  183 </span><span class="spaces">        </span><span class="istickedoff">pure $ AST.Entry $ I.Fix $ Identity $ AST.TypeAlias</span>
+<span class="lineno">  184 </span><span class="spaces">            </span><span class="istickedoff">[]</span>
+<span class="lineno">  185 </span><span class="spaces">            </span><span class="istickedoff">(C ([], []) (AST.NameWithArgs name (fmap (C []) parameters)))</span>
+<span class="lineno">  186 </span><span class="spaces">            </span><span class="istickedoff">(C [] $ toRawAST typ)</span>
+<span class="lineno">  187 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  188 </span><span class="spaces">    </span><span class="istickedoff">CustomType name parameters variants -&gt;</span>
+<span class="lineno">  189 </span><span class="spaces">        </span><span class="istickedoff">pure $ AST.Entry $ I.Fix $ Identity $ AST.Datatype</span>
+<span class="lineno">  190 </span><span class="spaces">            </span><span class="istickedoff">(C ([], []) (AST.NameWithArgs name (fmap (C []) parameters)))</span>
+<span class="lineno">  191 </span><span class="spaces">            </span><span class="istickedoff">(Either.fromRight <span class="nottickedoff">undefined</span> $ AST.fromCommentedList (C ([], [], Nothing) . fromCustomTypeVariant &lt;$&gt; variants))</span>
+<span class="lineno">  192 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  193 </span><span class="spaces">    </span><span class="istickedoff">Comment_tls comment -&gt;</span>
+<span class="lineno">  194 </span><span class="spaces">        </span><span class="istickedoff">pure $ AST.BodyComment $ fromComment comment</span></span>
+<span class="lineno">  195 </span>
+<span class="lineno">  196 </span>instance ToJSON TopLevelStructure where
+<span class="lineno">  197 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">  198 </span>    <span class="decl"><span class="istickedoff">toEncoding = pairs . toPairs</span></span>
+<span class="lineno">  199 </span>
+<span class="lineno">  200 </span>instance ToPairs TopLevelStructure where
+<span class="lineno">  201 </span>    <span class="decl"><span class="istickedoff">toPairs = \case</span>
+<span class="lineno">  202 </span><span class="spaces">        </span><span class="istickedoff">DefinitionStructure def -&gt;</span>
+<span class="lineno">  203 </span><span class="spaces">            </span><span class="istickedoff">toPairs def</span>
+<span class="lineno">  204 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  205 </span><span class="spaces">        </span><span class="istickedoff">TypeAlias name parameters t -&gt;</span>
+<span class="lineno">  206 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  207 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;TypeAlias&quot;</span>
+<span class="lineno">  208 </span><span class="spaces">                </span><span class="istickedoff">, &quot;name&quot; .= name</span>
+<span class="lineno">  209 </span><span class="spaces">                </span><span class="istickedoff">, &quot;parameters&quot; .= parameters</span>
+<span class="lineno">  210 </span><span class="spaces">                </span><span class="istickedoff">, &quot;type&quot; .= t</span>
+<span class="lineno">  211 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  212 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  213 </span><span class="spaces">        </span><span class="istickedoff">CustomType name parameters variants -&gt;</span>
+<span class="lineno">  214 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  215 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;CustomType&quot;</span>
+<span class="lineno">  216 </span><span class="spaces">                </span><span class="istickedoff">, &quot;name&quot; .= name</span>
+<span class="lineno">  217 </span><span class="spaces">                </span><span class="istickedoff">, &quot;parameters&quot; .= parameters</span>
+<span class="lineno">  218 </span><span class="spaces">                </span><span class="istickedoff">, &quot;variants&quot; .= variants</span>
+<span class="lineno">  219 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  220 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  221 </span><span class="spaces">        </span><span class="istickedoff">Comment_tls comment -&gt;</span>
+<span class="lineno">  222 </span><span class="spaces">            </span><span class="istickedoff">toPairs comment</span>
+<span class="lineno">  223 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  224 </span><span class="spaces">        </span><span class="istickedoff">TODO_TopLevelStructure s -&gt;</span>
+<span class="lineno">  225 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">&quot;TODO&quot; .= s</span></span></span>
+<span class="lineno">  226 </span>
+<span class="lineno">  227 </span>instance FromJSON TopLevelStructure where
+<span class="lineno">  228 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;TopLevelStructure&quot;</span> $ \obj -&gt; do</span>
+<span class="lineno">  229 </span><span class="spaces">        </span><span class="istickedoff">tag :: Text &lt;- obj .: &quot;tag&quot;</span>
+<span class="lineno">  230 </span><span class="spaces">        </span><span class="istickedoff">case tag of</span>
+<span class="lineno">  231 </span><span class="spaces">            </span><span class="istickedoff">&quot;Definition&quot; -&gt;</span>
+<span class="lineno">  232 </span><span class="spaces">                </span><span class="istickedoff">DefinitionStructure &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  233 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  234 </span><span class="spaces">            </span><span class="istickedoff">&quot;TypeAlias&quot; -&gt;</span>
+<span class="lineno">  235 </span><span class="spaces">                </span><span class="istickedoff">TypeAlias</span>
+<span class="lineno">  236 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;name&quot;</span>
+<span class="lineno">  237 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .:? &quot;parameters&quot; .!= []</span>
+<span class="lineno">  238 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;type&quot;</span>
+<span class="lineno">  239 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  240 </span><span class="spaces">            </span><span class="istickedoff">&quot;CustomType&quot; -&gt;</span>
+<span class="lineno">  241 </span><span class="spaces">                </span><span class="istickedoff">CustomType</span>
+<span class="lineno">  242 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;name&quot;</span>
+<span class="lineno">  243 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .:? &quot;parameters&quot; .!= []</span>
+<span class="lineno">  244 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;variants&quot;</span>
+<span class="lineno">  245 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  246 </span><span class="spaces">            </span><span class="istickedoff">&quot;Comment&quot; -&gt;</span>
+<span class="lineno">  247 </span><span class="spaces">                </span><span class="istickedoff">Comment_tls &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  248 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  249 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  250 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">fail (&quot;unexpected TopLevelStructure tag: &quot; &lt;&gt; Text.unpack tag)</span></span></span>
+
+</pre>
+</body>
+</html>

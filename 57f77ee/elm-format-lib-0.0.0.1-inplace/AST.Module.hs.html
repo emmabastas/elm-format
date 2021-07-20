@@ -1,0 +1,117 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE TypeSynonymInstances #-}
+<span class="lineno">    2 </span>{-# LANGUAGE FlexibleInstances #-}
+<span class="lineno">    3 </span>{-# LANGUAGE TypeFamilies #-}
+<span class="lineno">    4 </span>{-# LANGUAGE StandaloneDeriving #-}
+<span class="lineno">    5 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    6 </span>
+<span class="lineno">    7 </span>module AST.Module
+<span class="lineno">    8 </span>    ( Module(..), Header(..), SourceTag(..), SourceSettings
+<span class="lineno">    9 </span>    , UserImport, ImportMethod(..)
+<span class="lineno">   10 </span>    , DetailedListing(..)
+<span class="lineno">   11 </span>    , defaultHeader
+<span class="lineno">   12 </span>    ) where
+<span class="lineno">   13 </span>
+<span class="lineno">   14 </span>import AST.Listing (Listing)
+<span class="lineno">   15 </span>import qualified AST.Listing as Listing
+<span class="lineno">   16 </span>import qualified Cheapskate.Types as Markdown
+<span class="lineno">   17 </span>import Data.Map.Strict (Map)
+<span class="lineno">   18 </span>import qualified Reporting.Annotation as A
+<span class="lineno">   19 </span>import AST.V0_16
+<span class="lineno">   20 </span>
+<span class="lineno">   21 </span>
+<span class="lineno">   22 </span>-- MODULES
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>data Module ns body =
+<span class="lineno">   26 </span>    Module
+<span class="lineno">   27 </span>    { <span class="istickedoff"><span class="decl"><span class="istickedoff">initialComments</span></span></span> :: Comments
+<span class="lineno">   28 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">header</span></span></span> :: Maybe Header
+<span class="lineno">   29 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">docs</span></span></span> :: A.Located (Maybe Markdown.Blocks)
+<span class="lineno">   30 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">imports</span></span></span> :: C1 'BeforeTerm (Map ns (C1 'BeforeTerm ImportMethod))
+<span class="lineno">   31 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">body</span></span></span> :: body
+<span class="lineno">   32 </span>    }
+<span class="lineno">   33 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">   34 </span>
+<span class="lineno">   35 </span>
+<span class="lineno">   36 </span>-- HEADERS
+<span class="lineno">   37 </span>
+<span class="lineno">   38 </span>data SourceTag
+<span class="lineno">   39 </span>  = Normal
+<span class="lineno">   40 </span>  | Effect Comments
+<span class="lineno">   41 </span>  | Port Comments
+<span class="lineno">   42 </span>  deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   43 </span>
+<span class="lineno">   44 </span>
+<span class="lineno">   45 </span>{-| Basic info needed to identify modules and determine dependencies. -}
+<span class="lineno">   46 </span>data Header = Header
+<span class="lineno">   47 </span>    { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">srcTag</span></span></span> :: SourceTag
+<span class="lineno">   48 </span>    , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">name</span></span></span> :: C2 'BeforeTerm 'AfterTerm [UppercaseIdentifier]
+<span class="lineno">   49 </span>    , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">moduleSettings</span></span></span> :: Maybe (C2 'BeforeSeparator 'AfterSeparator SourceSettings)
+<span class="lineno">   50 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">exports</span></span></span> :: Maybe (C2 'BeforeSeparator 'AfterSeparator (Listing DetailedListing))
+<span class="lineno">   51 </span>    }
+<span class="lineno">   52 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   53 </span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>defaultHeader :: Header
+<span class="lineno">   56 </span><span class="decl"><span class="istickedoff">defaultHeader =</span>
+<span class="lineno">   57 </span><span class="spaces">    </span><span class="istickedoff">Header</span>
+<span class="lineno">   58 </span><span class="spaces">        </span><span class="istickedoff">Normal</span>
+<span class="lineno">   59 </span><span class="spaces">        </span><span class="istickedoff">(C ([], []) [UppercaseIdentifier &quot;Main&quot;])</span>
+<span class="lineno">   60 </span><span class="spaces">        </span><span class="istickedoff">Nothing</span>
+<span class="lineno">   61 </span><span class="spaces">        </span><span class="istickedoff">Nothing</span></span>
+<span class="lineno">   62 </span>
+<span class="lineno">   63 </span>
+<span class="lineno">   64 </span>data DetailedListing = DetailedListing
+<span class="lineno">   65 </span>    { <span class="istickedoff"><span class="decl"><span class="istickedoff">values</span></span></span> :: Listing.CommentedMap LowercaseIdentifier ()
+<span class="lineno">   66 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">operators</span></span></span> :: Listing.CommentedMap SymbolIdentifier ()
+<span class="lineno">   67 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">types</span></span></span> :: Listing.CommentedMap UppercaseIdentifier (C1 'BeforeTerm (Listing (Listing.CommentedMap UppercaseIdentifier ())))
+<span class="lineno">   68 </span>    }
+<span class="lineno">   69 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   70 </span>
+<span class="lineno">   71 </span>instance Semigroup DetailedListing where
+<span class="lineno">   72 </span>    <span class="decl"><span class="nottickedoff">(DetailedListing av ao at) &lt;&gt; (DetailedListing bv bo bt) = DetailedListing (av &lt;&gt; bv) (ao &lt;&gt; bo) (at &lt;&gt; bt)</span></span>
+<span class="lineno">   73 </span>
+<span class="lineno">   74 </span>instance Monoid DetailedListing where
+<span class="lineno">   75 </span>    <span class="decl"><span class="nottickedoff">mempty = DetailedListing mempty mempty mempty</span></span>
+<span class="lineno">   76 </span>
+<span class="lineno">   77 </span>
+<span class="lineno">   78 </span>type SourceSettings =
+<span class="lineno">   79 </span>    [ ( C2 'BeforeTerm 'AfterTerm LowercaseIdentifier
+<span class="lineno">   80 </span>      , C2 'BeforeTerm 'AfterTerm UppercaseIdentifier
+<span class="lineno">   81 </span>      )
+<span class="lineno">   82 </span>    ]
+<span class="lineno">   83 </span>
+<span class="lineno">   84 </span>-- IMPORTs
+<span class="lineno">   85 </span>
+<span class="lineno">   86 </span>type UserImport
+<span class="lineno">   87 </span>    = (C1 'BeforeTerm [UppercaseIdentifier], ImportMethod)
+<span class="lineno">   88 </span>
+<span class="lineno">   89 </span>
+<span class="lineno">   90 </span>data ImportMethod = ImportMethod
+<span class="lineno">   91 </span>    { <span class="istickedoff"><span class="decl"><span class="istickedoff">alias</span></span></span> :: Maybe (C2 'BeforeSeparator 'AfterSeparator UppercaseIdentifier)
+<span class="lineno">   92 </span>    , <span class="istickedoff"><span class="decl"><span class="istickedoff">exposedVars</span></span></span> :: C2 'BeforeSeparator 'AfterSeparator (Listing DetailedListing)
+<span class="lineno">   93 </span>    }
+<span class="lineno">   94 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+
+</pre>
+</body>
+</html>

@@ -1,0 +1,306 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    2 </span>module Parse.Module (moduleDecl, elmModule, topLevel, import') where
+<span class="lineno">    3 </span>
+<span class="lineno">    4 </span>import qualified Control.Applicative
+<span class="lineno">    5 </span>import Data.Map.Strict ( Map, empty, insert, insertWith )
+<span class="lineno">    6 </span>import Elm.Utils ((|&gt;))
+<span class="lineno">    7 </span>import Text.Parsec ( char, letter, string, choice, eof, option, optionMaybe, (&lt;?&gt;), (&lt;|&gt;), many, try )
+<span class="lineno">    8 </span>import Parse.Helpers
+<span class="lineno">    9 </span>import qualified Parse.Declaration as Decl
+<span class="lineno">   10 </span>import AST.Listing (Listing(..), mergeCommentedMap, mergeListing)
+<span class="lineno">   11 </span>import qualified AST.Listing as Listing
+<span class="lineno">   12 </span>import AST.Module (DetailedListing, Module, ImportMethod)
+<span class="lineno">   13 </span>import qualified AST.Module as Module
+<span class="lineno">   14 </span>import AST.Structure
+<span class="lineno">   15 </span>import AST.V0_16
+<span class="lineno">   16 </span>import qualified Data.Indexed as I
+<span class="lineno">   17 </span>import ElmVersion
+<span class="lineno">   18 </span>import Parse.IParser
+<span class="lineno">   19 </span>import Parse.Whitespace
+<span class="lineno">   20 </span>import Reporting.Annotation (Located)
+<span class="lineno">   21 </span>
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>elmModule :: ElmVersion -&gt; IParser (Module [UppercaseIdentifier] (ASTNS Located [UppercaseIdentifier] 'TopLevelNK))
+<span class="lineno">   24 </span><span class="decl"><span class="istickedoff">elmModule elmVersion =</span>
+<span class="lineno">   25 </span><span class="spaces">  </span><span class="istickedoff">do  preModule &lt;- option [] freshLine</span>
+<span class="lineno">   26 </span><span class="spaces">      </span><span class="istickedoff">h &lt;- moduleDecl elmVersion</span>
+<span class="lineno">   27 </span><span class="spaces">      </span><span class="istickedoff">preDocsComments &lt;- option [] freshLine</span>
+<span class="lineno">   28 </span><span class="spaces">      </span><span class="istickedoff">(docs, postDocsComments) &lt;-</span>
+<span class="lineno">   29 </span><span class="spaces">        </span><span class="istickedoff">choice</span>
+<span class="lineno">   30 </span><span class="spaces">          </span><span class="istickedoff">[ (,) &lt;$&gt; addLocation (Just &lt;$&gt; docCommentAsMarkdown) &lt;*&gt; freshLine</span>
+<span class="lineno">   31 </span><span class="spaces">          </span><span class="istickedoff">, (,) &lt;$&gt; addLocation (return Nothing) &lt;*&gt; return []</span>
+<span class="lineno">   32 </span><span class="spaces">          </span><span class="istickedoff">]</span>
+<span class="lineno">   33 </span><span class="spaces">      </span><span class="istickedoff">(preImportComments, imports', postImportComments) &lt;- imports elmVersion</span>
+<span class="lineno">   34 </span><span class="spaces">      </span><span class="istickedoff">topLevels &lt;-</span>
+<span class="lineno">   35 </span><span class="spaces">          </span><span class="istickedoff">fmap I.Fix $</span>
+<span class="lineno">   36 </span><span class="spaces">          </span><span class="istickedoff">addLocation $</span>
+<span class="lineno">   37 </span><span class="spaces">          </span><span class="istickedoff">fmap TopLevel $</span>
+<span class="lineno">   38 </span><span class="spaces">          </span><span class="istickedoff">do</span>
+<span class="lineno">   39 </span><span class="spaces">              </span><span class="istickedoff">decls &lt;- topLevel $ Decl.declaration elmVersion</span>
+<span class="lineno">   40 </span><span class="spaces">              </span><span class="istickedoff">trailingComments &lt;-</span>
+<span class="lineno">   41 </span><span class="spaces">                  </span><span class="istickedoff">(++)</span>
+<span class="lineno">   42 </span><span class="spaces">                      </span><span class="istickedoff">&lt;$&gt; option [] freshLine</span>
+<span class="lineno">   43 </span><span class="spaces">                      </span><span class="istickedoff">&lt;*&gt; option [] spaces</span>
+<span class="lineno">   44 </span><span class="spaces">              </span><span class="istickedoff">eof</span>
+<span class="lineno">   45 </span><span class="spaces">              </span><span class="istickedoff">return ((map BodyComment postImportComments) ++ decls ++ (map BodyComment trailingComments))</span>
+<span class="lineno">   46 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   47 </span><span class="spaces">      </span><span class="istickedoff">return $</span>
+<span class="lineno">   48 </span><span class="spaces">        </span><span class="istickedoff">Module.Module</span>
+<span class="lineno">   49 </span><span class="spaces">          </span><span class="istickedoff">preModule</span>
+<span class="lineno">   50 </span><span class="spaces">          </span><span class="istickedoff">h</span>
+<span class="lineno">   51 </span><span class="spaces">          </span><span class="istickedoff">docs</span>
+<span class="lineno">   52 </span><span class="spaces">          </span><span class="istickedoff">(C (preDocsComments ++ postDocsComments ++ preImportComments) imports')</span>
+<span class="lineno">   53 </span><span class="spaces">          </span><span class="istickedoff">topLevels</span></span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>
+<span class="lineno">   56 </span>topLevel :: IParser a -&gt; IParser [TopLevelStructure a]
+<span class="lineno">   57 </span><span class="decl"><span class="istickedoff">topLevel entry =</span>
+<span class="lineno">   58 </span><span class="spaces">  </span><span class="istickedoff">(++) &lt;$&gt; option [] (((\x -&gt; [x]) &lt;$&gt; Decl.topLevelStructure entry))</span>
+<span class="lineno">   59 </span><span class="spaces">      </span><span class="istickedoff">&lt;*&gt; (concat &lt;$&gt; many (freshDef entry))</span></span>
+<span class="lineno">   60 </span>
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>freshDef :: IParser a -&gt; IParser [TopLevelStructure a]
+<span class="lineno">   63 </span><span class="decl"><span class="istickedoff">freshDef entry =</span>
+<span class="lineno">   64 </span><span class="spaces">    </span><span class="istickedoff">commitIf (freshLine &gt;&gt; (letter &lt;|&gt; char '_')) $</span>
+<span class="lineno">   65 </span><span class="spaces">      </span><span class="istickedoff">do  comments &lt;- freshLine</span>
+<span class="lineno">   66 </span><span class="spaces">          </span><span class="istickedoff">decl &lt;- Decl.topLevelStructure entry</span>
+<span class="lineno">   67 </span><span class="spaces">          </span><span class="istickedoff">return $ (map BodyComment comments) ++ [decl]</span></span>
+<span class="lineno">   68 </span>
+<span class="lineno">   69 </span>
+<span class="lineno">   70 </span>moduleDecl :: ElmVersion -&gt; IParser (Maybe Module.Header)
+<span class="lineno">   71 </span><span class="decl"><span class="istickedoff">moduleDecl elmVersion =</span>
+<span class="lineno">   72 </span><span class="spaces">  </span><span class="istickedoff">choice</span>
+<span class="lineno">   73 </span><span class="spaces">    </span><span class="istickedoff">[ try $ Just &lt;$&gt; moduleDecl_0_16 elmVersion</span>
+<span class="lineno">   74 </span><span class="spaces">    </span><span class="istickedoff">, Just &lt;$&gt; moduleDecl_0_17 elmVersion</span>
+<span class="lineno">   75 </span><span class="spaces">    </span><span class="istickedoff">, return Nothing</span>
+<span class="lineno">   76 </span><span class="spaces">    </span><span class="istickedoff">]</span></span>
+<span class="lineno">   77 </span>
+<span class="lineno">   78 </span>
+<span class="lineno">   79 </span>moduleDecl_0_16 :: ElmVersion -&gt; IParser Module.Header
+<span class="lineno">   80 </span><span class="decl"><span class="istickedoff">moduleDecl_0_16 elmVersion =</span>
+<span class="lineno">   81 </span><span class="spaces">  </span><span class="istickedoff">expecting <span class="nottickedoff">&quot;a module declaration&quot;</span> $</span>
+<span class="lineno">   82 </span><span class="spaces">  </span><span class="istickedoff">do  try (reserved elmVersion &quot;module&quot;)</span>
+<span class="lineno">   83 </span><span class="spaces">      </span><span class="istickedoff">preName &lt;- whitespace</span>
+<span class="lineno">   84 </span><span class="spaces">      </span><span class="istickedoff">names &lt;- dotSep1 (capVar elmVersion) &lt;?&gt; <span class="nottickedoff">&quot;the name of this module&quot;</span></span>
+<span class="lineno">   85 </span><span class="spaces">      </span><span class="istickedoff">postName &lt;- whitespace</span>
+<span class="lineno">   86 </span><span class="spaces">      </span><span class="istickedoff">exports &lt;- option <span class="nottickedoff">(OpenListing (C ([], []) ()))</span> (listing $ detailedListing elmVersion)</span>
+<span class="lineno">   87 </span><span class="spaces">      </span><span class="istickedoff">preWhere &lt;- whitespace</span>
+<span class="lineno">   88 </span><span class="spaces">      </span><span class="istickedoff">reserved elmVersion &quot;where&quot;</span>
+<span class="lineno">   89 </span><span class="spaces">      </span><span class="istickedoff">return $</span>
+<span class="lineno">   90 </span><span class="spaces">        </span><span class="istickedoff">Module.Header</span>
+<span class="lineno">   91 </span><span class="spaces">          </span><span class="istickedoff">Module.Normal</span>
+<span class="lineno">   92 </span><span class="spaces">          </span><span class="istickedoff">(C (preName, postName) names)</span>
+<span class="lineno">   93 </span><span class="spaces">          </span><span class="istickedoff">Nothing</span>
+<span class="lineno">   94 </span><span class="spaces">          </span><span class="istickedoff">(Just $ C (preWhere, []) exports)</span></span>
+<span class="lineno">   95 </span>
+<span class="lineno">   96 </span>
+<span class="lineno">   97 </span>moduleDecl_0_17 :: ElmVersion -&gt; IParser Module.Header
+<span class="lineno">   98 </span><span class="decl"><span class="istickedoff">moduleDecl_0_17 elmVersion =</span>
+<span class="lineno">   99 </span><span class="spaces">  </span><span class="istickedoff">expecting <span class="nottickedoff">&quot;a module declaration&quot;</span> $</span>
+<span class="lineno">  100 </span><span class="spaces">  </span><span class="istickedoff">do</span>
+<span class="lineno">  101 </span><span class="spaces">      </span><span class="istickedoff">srcTag &lt;-</span>
+<span class="lineno">  102 </span><span class="spaces">        </span><span class="istickedoff">try $</span>
+<span class="lineno">  103 </span><span class="spaces">            </span><span class="istickedoff">choice</span>
+<span class="lineno">  104 </span><span class="spaces">                </span><span class="istickedoff">[ Module.Port &lt;$&gt; (reserved elmVersion &quot;port&quot; *&gt; whitespace)</span>
+<span class="lineno">  105 </span><span class="spaces">                </span><span class="istickedoff">, Module.Effect &lt;$&gt; (reserved elmVersion &quot;effect&quot; *&gt; whitespace)</span>
+<span class="lineno">  106 </span><span class="spaces">                </span><span class="istickedoff">, return Module.Normal</span>
+<span class="lineno">  107 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  108 </span><span class="spaces">            </span><span class="istickedoff">&lt;* reserved elmVersion &quot;module&quot;</span>
+<span class="lineno">  109 </span><span class="spaces">      </span><span class="istickedoff">preName &lt;- whitespace</span>
+<span class="lineno">  110 </span><span class="spaces">      </span><span class="istickedoff">names &lt;- dotSep1 (capVar elmVersion) &lt;?&gt; <span class="nottickedoff">&quot;the name of this module&quot;</span></span>
+<span class="lineno">  111 </span><span class="spaces">      </span><span class="istickedoff">whereClause &lt;-</span>
+<span class="lineno">  112 </span><span class="spaces">        </span><span class="istickedoff">optionMaybe $</span>
+<span class="lineno">  113 </span><span class="spaces">          </span><span class="istickedoff">commentedKeyword elmVersion &quot;where&quot; $</span>
+<span class="lineno">  114 </span><span class="spaces">            </span><span class="istickedoff">brackets $ (\f pre post _ -&gt; f pre post) &lt;$&gt; commaSep1 (keyValue equals (lowVar elmVersion) (capVar elmVersion))</span>
+<span class="lineno">  115 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  116 </span><span class="spaces">      </span><span class="istickedoff">exports &lt;-</span>
+<span class="lineno">  117 </span><span class="spaces">        </span><span class="istickedoff">optionMaybe $</span>
+<span class="lineno">  118 </span><span class="spaces">        </span><span class="istickedoff">commentedKeyword elmVersion &quot;exposing&quot; (listing $ detailedListing elmVersion)</span>
+<span class="lineno">  119 </span><span class="spaces">          </span><span class="istickedoff">&lt;|&gt; try (listingWithoutExposing elmVersion)</span>
+<span class="lineno">  120 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  121 </span><span class="spaces">      </span><span class="istickedoff">return $</span>
+<span class="lineno">  122 </span><span class="spaces">        </span><span class="istickedoff">Module.Header</span>
+<span class="lineno">  123 </span><span class="spaces">          </span><span class="istickedoff">srcTag</span>
+<span class="lineno">  124 </span><span class="spaces">          </span><span class="istickedoff">(C (preName, []) names)</span>
+<span class="lineno">  125 </span><span class="spaces">          </span><span class="istickedoff">whereClause</span>
+<span class="lineno">  126 </span><span class="spaces">          </span><span class="istickedoff">exports</span></span>
+<span class="lineno">  127 </span>
+<span class="lineno">  128 </span>listingWithoutExposing :: ElmVersion -&gt; IParser (C2 beforeKeyword afterKeyword (Listing DetailedListing))
+<span class="lineno">  129 </span><span class="decl"><span class="istickedoff">listingWithoutExposing elmVersion = do</span>
+<span class="lineno">  130 </span><span class="spaces">    </span><span class="istickedoff">let pre = []</span>
+<span class="lineno">  131 </span><span class="spaces">    </span><span class="istickedoff">post &lt;- whitespace</span>
+<span class="lineno">  132 </span><span class="spaces">    </span><span class="istickedoff">C (pre, post) &lt;$&gt; listing (detailedListing elmVersion)</span></span>
+<span class="lineno">  133 </span>
+<span class="lineno">  134 </span>mergePreCommented :: (a -&gt; a -&gt; a) -&gt; C1 before a -&gt; C1 before a -&gt; C1 before a
+<span class="lineno">  135 </span><span class="decl"><span class="istickedoff">mergePreCommented merge (C pre1 left) (C pre2 right) =</span>
+<span class="lineno">  136 </span><span class="spaces">    </span><span class="istickedoff">C (pre1 ++ pre2) (merge left right)</span></span>
+<span class="lineno">  137 </span>
+<span class="lineno">  138 </span>mergeC2 :: (a -&gt; b -&gt; c) -&gt; C2 before after a -&gt; C2 before after b -&gt; C2 before after c
+<span class="lineno">  139 </span><span class="decl"><span class="istickedoff">mergeC2 merge (C (pre1, post1) left) (C (pre2, post2) right) =</span>
+<span class="lineno">  140 </span><span class="spaces">    </span><span class="istickedoff">C (pre1 ++ pre2, post1 ++ post2) (merge left right)</span></span>
+<span class="lineno">  141 </span>
+<span class="lineno">  142 </span>
+<span class="lineno">  143 </span>mergeDetailedListing :: Module.DetailedListing -&gt; Module.DetailedListing -&gt; Module.DetailedListing
+<span class="lineno">  144 </span><span class="decl"><span class="istickedoff">mergeDetailedListing left right =</span>
+<span class="lineno">  145 </span><span class="spaces">    </span><span class="istickedoff">Module.DetailedListing</span>
+<span class="lineno">  146 </span><span class="spaces">        </span><span class="istickedoff">(mergeCommentedMap <span class="nottickedoff">(&lt;&gt;)</span> (Module.values left) (Module.values right))</span>
+<span class="lineno">  147 </span><span class="spaces">        </span><span class="istickedoff">(mergeCommentedMap <span class="nottickedoff">(&lt;&gt;)</span> (Module.operators left) (Module.operators right))</span>
+<span class="lineno">  148 </span><span class="spaces">        </span><span class="istickedoff">(mergeCommentedMap (mergePreCommented $ mergeListing $ mergeCommentedMap <span class="nottickedoff">(&lt;&gt;)</span>) (Module.types left) (Module.types right))</span></span>
+<span class="lineno">  149 </span>
+<span class="lineno">  150 </span>
+<span class="lineno">  151 </span>imports :: ElmVersion -&gt; IParser (Comments, Map [UppercaseIdentifier] (C1 'BeforeTerm ImportMethod), Comments)
+<span class="lineno">  152 </span><span class="decl"><span class="istickedoff">imports elmVersion =</span>
+<span class="lineno">  153 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  154 </span><span class="spaces">        </span><span class="istickedoff">merge :: C1 'BeforeTerm ImportMethod -&gt; C1 'BeforeTerm ImportMethod -&gt; C1 'BeforeTerm ImportMethod</span>
+<span class="lineno">  155 </span><span class="spaces">        </span><span class="istickedoff">merge (C comments1 import1) (C comments2 import2) =</span>
+<span class="lineno">  156 </span><span class="spaces">            </span><span class="istickedoff">C (comments1 ++ comments2) $</span>
+<span class="lineno">  157 </span><span class="spaces">                </span><span class="istickedoff">Module.ImportMethod</span>
+<span class="lineno">  158 </span><span class="spaces">                    </span><span class="istickedoff">(Module.alias import1 Control.Applicative.&lt;|&gt; Module.alias import2)</span>
+<span class="lineno">  159 </span><span class="spaces">                    </span><span class="istickedoff">(mergeC2 (mergeListing mergeDetailedListing) (Module.exposedVars import1) (Module.exposedVars import2))</span>
+<span class="lineno">  160 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  161 </span><span class="spaces">        </span><span class="istickedoff">step (comments, m, finalComments) (((C pre name), method), post) =</span>
+<span class="lineno">  162 </span><span class="spaces">            </span><span class="istickedoff">( comments ++ finalComments</span>
+<span class="lineno">  163 </span><span class="spaces">            </span><span class="istickedoff">, insertWith merge name (C pre method) m</span>
+<span class="lineno">  164 </span><span class="spaces">            </span><span class="istickedoff">, post</span>
+<span class="lineno">  165 </span><span class="spaces">            </span><span class="istickedoff">)</span>
+<span class="lineno">  166 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  167 </span><span class="spaces">        </span><span class="istickedoff">done :: [(Module.UserImport, Comments)] -&gt; (Comments, Map [UppercaseIdentifier] (C1 'BeforeTerm ImportMethod), Comments)</span>
+<span class="lineno">  168 </span><span class="spaces">        </span><span class="istickedoff">done results =</span>
+<span class="lineno">  169 </span><span class="spaces">            </span><span class="istickedoff">foldl step ([], empty, []) results</span>
+<span class="lineno">  170 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  171 </span><span class="spaces">    </span><span class="istickedoff">done &lt;$&gt; many ((,) &lt;$&gt; import' elmVersion &lt;*&gt; freshLine)</span></span>
+<span class="lineno">  172 </span>
+<span class="lineno">  173 </span>
+<span class="lineno">  174 </span>import' :: ElmVersion -&gt; IParser Module.UserImport
+<span class="lineno">  175 </span><span class="decl"><span class="istickedoff">import' elmVersion =</span>
+<span class="lineno">  176 </span><span class="spaces">  </span><span class="istickedoff">expecting <span class="nottickedoff">&quot;an import&quot;</span> $</span>
+<span class="lineno">  177 </span><span class="spaces">  </span><span class="istickedoff">do  try (reserved elmVersion &quot;import&quot;)</span>
+<span class="lineno">  178 </span><span class="spaces">      </span><span class="istickedoff">preName &lt;- whitespace</span>
+<span class="lineno">  179 </span><span class="spaces">      </span><span class="istickedoff">names &lt;- dotSep1 $ capVar elmVersion</span>
+<span class="lineno">  180 </span><span class="spaces">      </span><span class="istickedoff">method' &lt;- method <span class="nottickedoff">names</span></span>
+<span class="lineno">  181 </span><span class="spaces">      </span><span class="istickedoff">return (C preName names, method')</span>
+<span class="lineno">  182 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  183 </span><span class="spaces">    </span><span class="istickedoff">method :: [UppercaseIdentifier] -&gt; IParser Module.ImportMethod</span>
+<span class="lineno">  184 </span><span class="spaces">    </span><span class="istickedoff">method originalName =</span>
+<span class="lineno">  185 </span><span class="spaces">      </span><span class="istickedoff">Module.ImportMethod</span>
+<span class="lineno">  186 </span><span class="spaces">        </span><span class="istickedoff">&lt;$&gt; option Nothing (Just &lt;$&gt; as' <span class="nottickedoff">originalName</span>)</span>
+<span class="lineno">  187 </span><span class="spaces">        </span><span class="istickedoff">&lt;*&gt; option (C ([], []) ClosedListing) (exposing &lt;|&gt; try (listingWithoutExposing elmVersion))</span>
+<span class="lineno">  188 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  189 </span><span class="spaces">    </span><span class="istickedoff">as' :: [UppercaseIdentifier] -&gt; IParser (C2 'BeforeSeparator 'AfterSeparator UppercaseIdentifier)</span>
+<span class="lineno">  190 </span><span class="spaces">    </span><span class="istickedoff">as' moduleName =</span>
+<span class="lineno">  191 </span><span class="spaces">      </span><span class="istickedoff">do  preAs &lt;- try (whitespace &lt;* reserved elmVersion &quot;as&quot;)</span>
+<span class="lineno">  192 </span><span class="spaces">          </span><span class="istickedoff">postAs &lt;- whitespace</span>
+<span class="lineno">  193 </span><span class="spaces">          </span><span class="istickedoff">C (preAs, postAs) &lt;$&gt; capVar elmVersion &lt;?&gt; <span class="nottickedoff">(&quot;an alias for module `&quot; ++ show moduleName ++ &quot;`&quot;)</span> -- TODO: do something correct instead of show</span>
+<span class="lineno">  194 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  195 </span><span class="spaces">    </span><span class="istickedoff">exposing :: IParser (C2 'BeforeSeparator 'AfterSeparator (Listing Module.DetailedListing))</span>
+<span class="lineno">  196 </span><span class="spaces">    </span><span class="istickedoff">exposing =</span>
+<span class="lineno">  197 </span><span class="spaces">      </span><span class="istickedoff">do  preExposing &lt;- try (whitespace &lt;* reserved elmVersion &quot;exposing&quot;)</span>
+<span class="lineno">  198 </span><span class="spaces">          </span><span class="istickedoff">postExposing &lt;- whitespace</span>
+<span class="lineno">  199 </span><span class="spaces">          </span><span class="istickedoff">imports &lt;-</span>
+<span class="lineno">  200 </span><span class="spaces">            </span><span class="istickedoff">choice</span>
+<span class="lineno">  201 </span><span class="spaces">              </span><span class="istickedoff">[ listing $ detailedListing elmVersion</span>
+<span class="lineno">  202 </span><span class="spaces">              </span><span class="istickedoff">, listingWithoutParens elmVersion</span>
+<span class="lineno">  203 </span><span class="spaces">              </span><span class="istickedoff">]</span>
+<span class="lineno">  204 </span><span class="spaces">          </span><span class="istickedoff">return $ C (preExposing, postExposing) imports</span></span>
+<span class="lineno">  205 </span>
+<span class="lineno">  206 </span>
+<span class="lineno">  207 </span>listing :: IParser (Comments -&gt; Comments -&gt; a) -&gt; IParser (Listing a)
+<span class="lineno">  208 </span><span class="decl"><span class="istickedoff">listing explicit =</span>
+<span class="lineno">  209 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">  210 </span><span class="spaces">    </span><span class="istickedoff">subparser = choice</span>
+<span class="lineno">  211 </span><span class="spaces">        </span><span class="istickedoff">[ (\_ pre post _ -&gt; (OpenListing (C (pre, post) ()))) &lt;$&gt; string &quot;..&quot;</span>
+<span class="lineno">  212 </span><span class="spaces">        </span><span class="istickedoff">, (\x pre post sawNewline -&gt; (ExplicitListing (x pre post) sawNewline)) &lt;$&gt;</span>
+<span class="lineno">  213 </span><span class="spaces">            </span><span class="istickedoff">explicit</span>
+<span class="lineno">  214 </span><span class="spaces">        </span><span class="istickedoff">]</span>
+<span class="lineno">  215 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">  216 </span><span class="spaces">    </span><span class="istickedoff">expecting <span class="nottickedoff">&quot;a listing of values and types to expose, like (..)&quot;</span> $</span>
+<span class="lineno">  217 </span><span class="spaces">    </span><span class="istickedoff">do  _ &lt;- try (char '(')</span>
+<span class="lineno">  218 </span><span class="spaces">        </span><span class="istickedoff">((pre, listing, post), multiline) &lt;- trackNewline ((,,) &lt;$&gt; whitespace &lt;*&gt; subparser &lt;*&gt; whitespace)</span>
+<span class="lineno">  219 </span><span class="spaces">        </span><span class="istickedoff">_ &lt;- char ')'</span>
+<span class="lineno">  220 </span><span class="spaces">        </span><span class="istickedoff">return $ listing pre post $ multilineToBool multiline</span></span>
+<span class="lineno">  221 </span>
+<span class="lineno">  222 </span>
+<span class="lineno">  223 </span>listingWithoutParens :: ElmVersion -&gt; IParser (Listing Module.DetailedListing)
+<span class="lineno">  224 </span><span class="decl"><span class="istickedoff">listingWithoutParens elmVersion =</span>
+<span class="lineno">  225 </span><span class="spaces">  </span><span class="istickedoff">expecting <span class="nottickedoff">&quot;a listing of values and types to expose, but with missing parentheses&quot;</span> $</span>
+<span class="lineno">  226 </span><span class="spaces">  </span><span class="istickedoff">choice</span>
+<span class="lineno">  227 </span><span class="spaces">    </span><span class="istickedoff">[ (\_ -&gt; (OpenListing (C ([], []) <span class="nottickedoff">()</span>))) &lt;$&gt; string &quot;..&quot;</span>
+<span class="lineno">  228 </span><span class="spaces">    </span><span class="istickedoff">, (\x -&gt; (ExplicitListing (x [] []) False)) &lt;$&gt; detailedListing elmVersion</span>
+<span class="lineno">  229 </span><span class="spaces">    </span><span class="istickedoff">]</span></span>
+<span class="lineno">  230 </span>
+<span class="lineno">  231 </span>
+<span class="lineno">  232 </span>commentedSet :: Ord a =&gt; IParser a -&gt; IParser (Comments -&gt; Comments -&gt; Listing.CommentedMap a ())
+<span class="lineno">  233 </span><span class="decl"><span class="istickedoff">commentedSet item =</span>
+<span class="lineno">  234 </span><span class="spaces">    </span><span class="istickedoff">commaSep1Set' ((\x -&gt; (x, ())) &lt;$&gt; item) (\() () -&gt; ())</span></span>
+<span class="lineno">  235 </span>
+<span class="lineno">  236 </span>
+<span class="lineno">  237 </span>detailedListing :: ElmVersion -&gt; IParser (Comments -&gt; Comments -&gt; Module.DetailedListing)
+<span class="lineno">  238 </span><span class="decl"><span class="istickedoff">detailedListing elmVersion =</span>
+<span class="lineno">  239 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">  240 </span><span class="spaces">      </span><span class="istickedoff">values &lt;- commaSep1' (value elmVersion)</span>
+<span class="lineno">  241 </span><span class="spaces">      </span><span class="istickedoff">return $ \pre post -&gt; toDetailedListing $ values pre post</span></span>
+<span class="lineno">  242 </span>
+<span class="lineno">  243 </span>
+<span class="lineno">  244 </span>toDetailedListing :: [C2 before after Listing.Value] -&gt; Module.DetailedListing
+<span class="lineno">  245 </span><span class="decl"><span class="istickedoff">toDetailedListing values =</span>
+<span class="lineno">  246 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  247 </span><span class="spaces">        </span><span class="istickedoff">merge</span>
+<span class="lineno">  248 </span><span class="spaces">            </span><span class="istickedoff">(C (pre1, post1) (C inner1 tags1))</span>
+<span class="lineno">  249 </span><span class="spaces">            </span><span class="istickedoff">(C (pre2, post2) (C inner2 tags2))</span>
+<span class="lineno">  250 </span><span class="spaces">            </span><span class="istickedoff">=</span>
+<span class="lineno">  251 </span><span class="spaces">            </span><span class="istickedoff">C (pre1 ++ pre2, post1 ++ post2) $</span>
+<span class="lineno">  252 </span><span class="spaces">                </span><span class="istickedoff">C (inner1 ++ inner2) $</span>
+<span class="lineno">  253 </span><span class="spaces">                    </span><span class="istickedoff">mergeListing (mergeCommentedMap <span class="nottickedoff">(&lt;&gt;)</span>) tags1 tags2</span>
+<span class="lineno">  254 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  255 </span><span class="spaces">        </span><span class="istickedoff">step (vs, os, ts) (C (pre, post) val) =</span>
+<span class="lineno">  256 </span><span class="spaces">            </span><span class="istickedoff">case val of</span>
+<span class="lineno">  257 </span><span class="spaces">                </span><span class="istickedoff">Listing.Value name -&gt;</span>
+<span class="lineno">  258 </span><span class="spaces">                    </span><span class="istickedoff">(insert name (C (pre, post) ()) vs, os, ts)</span>
+<span class="lineno">  259 </span><span class="spaces">                </span><span class="istickedoff">Listing.OpValue name -&gt;</span>
+<span class="lineno">  260 </span><span class="spaces">                    </span><span class="istickedoff">(vs, insert name (C (pre, post) ()) os, ts)</span>
+<span class="lineno">  261 </span><span class="spaces">                </span><span class="istickedoff">Listing.Union (C inner name) tags -&gt;</span>
+<span class="lineno">  262 </span><span class="spaces">                    </span><span class="istickedoff">(vs, os, insertWith merge name (C (pre, post) (C inner tags)) ts)</span>
+<span class="lineno">  263 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  264 </span><span class="spaces">        </span><span class="istickedoff">done (vs, os, ts) =</span>
+<span class="lineno">  265 </span><span class="spaces">            </span><span class="istickedoff">Module.DetailedListing vs os ts</span>
+<span class="lineno">  266 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  267 </span><span class="spaces">    </span><span class="istickedoff">foldl step (empty, empty, empty) values</span>
+<span class="lineno">  268 </span><span class="spaces">        </span><span class="istickedoff">|&gt; done</span></span>
+<span class="lineno">  269 </span>
+<span class="lineno">  270 </span>
+<span class="lineno">  271 </span>value :: ElmVersion -&gt; IParser Listing.Value
+<span class="lineno">  272 </span><span class="decl"><span class="istickedoff">value elmVersion =</span>
+<span class="lineno">  273 </span><span class="spaces">    </span><span class="istickedoff">val &lt;|&gt; tipe &lt;?&gt; <span class="nottickedoff">&quot;a value or type to expose&quot;</span></span>
+<span class="lineno">  274 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  275 </span><span class="spaces">    </span><span class="istickedoff">val =</span>
+<span class="lineno">  276 </span><span class="spaces">      </span><span class="istickedoff">(Listing.Value &lt;$&gt; lowVar elmVersion) &lt;|&gt; (Listing.OpValue &lt;$&gt; parens' symOp)</span>
+<span class="lineno">  277 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  278 </span><span class="spaces">    </span><span class="istickedoff">tipe =</span>
+<span class="lineno">  279 </span><span class="spaces">      </span><span class="istickedoff">do  name &lt;- capVar elmVersion</span>
+<span class="lineno">  280 </span><span class="spaces">          </span><span class="istickedoff">maybeCtors &lt;- optionMaybe (try $ (,) &lt;$&gt; whitespace &lt;*&gt; listing (commentedSet $ capVar elmVersion))</span>
+<span class="lineno">  281 </span><span class="spaces">          </span><span class="istickedoff">case maybeCtors of</span>
+<span class="lineno">  282 </span><span class="spaces">            </span><span class="istickedoff">Nothing -&gt; return $ Listing.Union (C [] name) Listing.ClosedListing</span>
+<span class="lineno">  283 </span><span class="spaces">            </span><span class="istickedoff">Just (pre, ctors) -&gt; return (Listing.Union (C pre name) ctors)</span></span>
+
+</pre>
+</body>
+</html>
