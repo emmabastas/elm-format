@@ -1,0 +1,59 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    2 </span>{-# LANGUAGE GADTs #-}
+<span class="lineno">    3 </span>module ElmFormat.AST.PatternMatching where
+<span class="lineno">    4 </span>
+<span class="lineno">    5 </span>import ElmFormat.AST.Shared
+<span class="lineno">    6 </span>import AST.V0_16
+<span class="lineno">    7 </span>import AST.Structure
+<span class="lineno">    8 </span>import Reporting.Annotation (Located(A))
+<span class="lineno">    9 </span>import Data.Indexed as I
+<span class="lineno">   10 </span>
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>{-| Takes a list of patterns and matches them agains a type,
+<span class="lineno">   13 </span>extracting the types of each of the patterns
+<span class="lineno">   14 </span>and the return type of a function that has that list of patterns as its parameters.
+<span class="lineno">   15 </span>
+<span class="lineno">   16 </span>TODO: retain all comments in the output
+<span class="lineno">   17 </span>TODO: make complete function so it doesn't crash on invalid source files
+<span class="lineno">   18 </span>-}
+<span class="lineno">   19 </span>matchType ::
+<span class="lineno">   20 </span>    List (C1 'BeforeTerm (ASTNS Located ns 'PatternNK))
+<span class="lineno">   21 </span>    -&gt; ASTNS Located ns 'TypeNK
+<span class="lineno">   22 </span>    -&gt; ( List (C1 'BeforeTerm (ASTNS Located ns 'PatternNK), ASTNS Located ns 'TypeNK)
+<span class="lineno">   23 </span>       , ASTNS Located ns 'TypeNK
+<span class="lineno">   24 </span>       )
+<span class="lineno">   25 </span><span class="decl"><span class="istickedoff">matchType [] typ = ( [], typ )</span>
+<span class="lineno">   26 </span><span class="spaces"></span><span class="istickedoff">matchType (pat : restPat) (I.Fix (A region (FunctionType (C eol typ) restTyp multiline))) =</span>
+<span class="lineno">   27 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   28 </span><span class="spaces">        </span><span class="istickedoff">nextTyp =</span>
+<span class="lineno">   29 </span><span class="spaces">            </span><span class="istickedoff">case toCommentedList restTyp of</span>
+<span class="lineno">   30 </span><span class="spaces">                </span><span class="istickedoff">[ (C _ single) ] -&gt; single</span>
+<span class="lineno">   31 </span><span class="spaces">                </span><span class="istickedoff">( (C (_, _, eol2) first) : rest ) -&gt; I.Fix $ A region $ FunctionType (C <span class="nottickedoff">eol2</span> first) (Sequence rest) <span class="nottickedoff">multiline</span></span>
+<span class="lineno">   32 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   33 </span><span class="spaces">        </span><span class="istickedoff">( pats, retType ) =</span>
+<span class="lineno">   34 </span><span class="spaces">            </span><span class="istickedoff">matchType restPat nextTyp</span>
+<span class="lineno">   35 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">   36 </span><span class="spaces">    </span><span class="istickedoff">( (pat, typ) : pats, retType )</span></span>
+
+</pre>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module Parse.Common
+<span class="lineno">    2 </span>    ( sectionedGroup, pair
+<span class="lineno">    3 </span>    , commented, preCommented, postCommented, withEol
+<span class="lineno">    4 </span>    , checkMultiline
+<span class="lineno">    5 </span>    ) where
+<span class="lineno">    6 </span>
+<span class="lineno">    7 </span>import AST.V0_16
+<span class="lineno">    8 </span>import Text.Parsec
+<span class="lineno">    9 </span>import Parse.Helpers
+<span class="lineno">   10 </span>import Parse.Whitespace
+<span class="lineno">   11 </span>import Parse.IParser
+<span class="lineno">   12 </span>import Parse.Comments
+<span class="lineno">   13 </span>
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>--
+<span class="lineno">   16 </span>-- Structure
+<span class="lineno">   17 </span>--
+<span class="lineno">   18 </span>
+<span class="lineno">   19 </span>
+<span class="lineno">   20 </span>pair :: IParser a -&gt; IParser sep -&gt; IParser b -&gt; IParser (Pair a b)
+<span class="lineno">   21 </span><span class="decl"><span class="istickedoff">pair a sep b =</span>
+<span class="lineno">   22 </span><span class="spaces">    </span><span class="istickedoff">checkMultiline $ Pair &lt;$&gt; postCommented a &lt;* sep &lt;*&gt; preCommented b</span></span>
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>sectionedGroup :: IParser a -&gt; IParser (Sequence a, Comments)
+<span class="lineno">   26 </span><span class="decl"><span class="istickedoff">sectionedGroup term =</span>
+<span class="lineno">   27 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   28 </span><span class="spaces">        </span><span class="istickedoff">step leading terms =</span>
+<span class="lineno">   29 </span><span class="spaces">            </span><span class="istickedoff">do</span>
+<span class="lineno">   30 </span><span class="spaces">                </span><span class="istickedoff">pre &lt;- whitespace</span>
+<span class="lineno">   31 </span><span class="spaces">                </span><span class="istickedoff">(C eol first) &lt;- withEol term</span>
+<span class="lineno">   32 </span><span class="spaces">                </span><span class="istickedoff">preSep &lt;- whitespace</span>
+<span class="lineno">   33 </span><span class="spaces">                </span><span class="istickedoff">hasMore &lt;- choice [ comma *&gt; return True, return False ]</span>
+<span class="lineno">   34 </span><span class="spaces">                </span><span class="istickedoff">if hasMore</span>
+<span class="lineno">   35 </span><span class="spaces">                    </span><span class="istickedoff">then step preSep (C (leading, pre, eol) first : terms)</span>
+<span class="lineno">   36 </span><span class="spaces">                    </span><span class="istickedoff">else return (Sequence $ reverse (C (leading, pre, eol) first : terms), preSep)</span>
+<span class="lineno">   37 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">   38 </span><span class="spaces">        </span><span class="istickedoff">choice</span>
+<span class="lineno">   39 </span><span class="spaces">            </span><span class="istickedoff">[ try $ step [] []</span>
+<span class="lineno">   40 </span><span class="spaces">            </span><span class="istickedoff">, (,) (Sequence []) &lt;$&gt; whitespace</span>
+<span class="lineno">   41 </span><span class="spaces">            </span><span class="istickedoff">]</span></span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>
+<span class="lineno">   44 </span>--
+<span class="lineno">   45 </span>-- Other helpers
+<span class="lineno">   46 </span>--
+<span class="lineno">   47 </span>
+<span class="lineno">   48 </span>
+<span class="lineno">   49 </span>checkMultiline :: IParser (ForceMultiline -&gt; a) -&gt; IParser a
+<span class="lineno">   50 </span><span class="decl"><span class="istickedoff">checkMultiline inner =</span>
+<span class="lineno">   51 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">   52 </span><span class="spaces">        </span><span class="istickedoff">(a, multiline) &lt;- trackNewline inner</span>
+<span class="lineno">   53 </span><span class="spaces">        </span><span class="istickedoff">return $ a (ForceMultiline $ multilineToBool multiline)</span></span>
+
+</pre>
+</body>
+</html>

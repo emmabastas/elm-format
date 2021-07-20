@@ -1,0 +1,78 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE TypeSynonymInstances #-}
+<span class="lineno">    2 </span>{-# LANGUAGE FlexibleInstances #-}
+<span class="lineno">    3 </span>
+<span class="lineno">    4 </span>module Reporting.Annotation where
+<span class="lineno">    5 </span>
+<span class="lineno">    6 </span>import Prelude ()
+<span class="lineno">    7 </span>import Relude
+<span class="lineno">    8 </span>
+<span class="lineno">    9 </span>import Data.Coapplicative
+<span class="lineno">   10 </span>import Text.Show (showParen, showString, showsPrec)
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>import qualified Reporting.Region as R
+<span class="lineno">   13 </span>import qualified Data.String as String
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>
+<span class="lineno">   16 </span>-- ANNOTATION
+<span class="lineno">   17 </span>
+<span class="lineno">   18 </span>data Located a =
+<span class="lineno">   19 </span>    A R.Region a
+<span class="lineno">   20 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">   21 </span>
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>instance (Show a) =&gt; Show (Located a) where
+<span class="lineno">   24 </span>    <span class="decl"><span class="nottickedoff">showsPrec p (A ann a) = showParen (p &gt; 10) $</span>
+<span class="lineno">   25 </span><span class="spaces">        </span><span class="nottickedoff">showString $ String.unwords</span>
+<span class="lineno">   26 </span><span class="spaces">            </span><span class="nottickedoff">[ show ann</span>
+<span class="lineno">   27 </span><span class="spaces">            </span><span class="nottickedoff">, showsPrec 99 a &quot;&quot;</span>
+<span class="lineno">   28 </span><span class="spaces">            </span><span class="nottickedoff">]</span></span>
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>instance Coapplicative Located where
+<span class="lineno">   31 </span>    <span class="decl"><span class="istickedoff">extract (A _ x) = x</span></span>
+<span class="lineno">   32 </span>    {-# INLINE extract #-}
+<span class="lineno">   33 </span>
+<span class="lineno">   34 </span>instance Foldable Located where
+<span class="lineno">   35 </span>    <span class="decl"><span class="nottickedoff">foldMap f (A _ a) = f a</span></span>
+<span class="lineno">   36 </span>
+<span class="lineno">   37 </span>instance Traversable Located where
+<span class="lineno">   38 </span>    <span class="decl"><span class="istickedoff">traverse f (A region a) = fmap (A region) $ f a</span></span>
+<span class="lineno">   39 </span>
+<span class="lineno">   40 </span>
+<span class="lineno">   41 </span>-- CREATE
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>at :: R.Position -&gt; R.Position -&gt; a -&gt; Located a
+<span class="lineno">   44 </span><span class="decl"><span class="istickedoff">at start end value =</span>
+<span class="lineno">   45 </span><span class="spaces">    </span><span class="istickedoff">A (R.Region start end) value</span></span>
+<span class="lineno">   46 </span>
+<span class="lineno">   47 </span>
+<span class="lineno">   48 </span>merge :: Located a -&gt; Located b -&gt; value -&gt; Located value
+<span class="lineno">   49 </span><span class="decl"><span class="nottickedoff">merge (A region1 _) (A region2 _) value =</span>
+<span class="lineno">   50 </span><span class="spaces">    </span><span class="nottickedoff">A (R.merge region1 region2) value</span></span>
+<span class="lineno">   51 </span>
+<span class="lineno">   52 </span>
+<span class="lineno">   53 </span>sameAs :: Located a -&gt; b -&gt; Located b
+<span class="lineno">   54 </span><span class="decl"><span class="nottickedoff">sameAs (A annotation _) value =</span>
+<span class="lineno">   55 </span><span class="spaces">    </span><span class="nottickedoff">A annotation value</span></span>
+
+</pre>
+</body>
+</html>

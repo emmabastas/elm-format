@@ -1,0 +1,56 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module ElmFormat.KnownContents
+<span class="lineno">    2 </span>    ( KnownContents
+<span class="lineno">    3 </span>    , fromFunction
+<span class="lineno">    4 </span>    , isKnown, get
+<span class="lineno">    5 </span>    )
+<span class="lineno">    6 </span>    where
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>import AST.V0_16
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>newtype KnownContents =
+<span class="lineno">   11 </span>    KnownContents ([UppercaseIdentifier] -&gt; Maybe [LocalName]) -- return Nothing if the contents are unknown
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>instance Semigroup KnownContents where
+<span class="lineno">   14 </span>    <span class="decl"><span class="nottickedoff">(KnownContents a) &lt;&gt; (KnownContents b) = KnownContents (\ns -&gt; a ns &lt;&gt; b ns)</span></span>
+<span class="lineno">   15 </span>
+<span class="lineno">   16 </span>instance Monoid KnownContents where
+<span class="lineno">   17 </span>    <span class="decl"><span class="istickedoff">mempty = fromFunction (const Nothing)</span></span>
+<span class="lineno">   18 </span>
+<span class="lineno">   19 </span>
+<span class="lineno">   20 </span>fromFunction :: ([UppercaseIdentifier] -&gt; Maybe [LocalName]) -&gt; KnownContents
+<span class="lineno">   21 </span>{-# INLINE fromFunction #-}
+<span class="lineno">   22 </span><span class="decl"><span class="istickedoff">fromFunction = KnownContents</span></span>
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>isKnown :: KnownContents -&gt; [UppercaseIdentifier] -&gt; Bool
+<span class="lineno">   26 </span><span class="decl"><span class="nottickedoff">isKnown (KnownContents lookup) =</span>
+<span class="lineno">   27 </span><span class="spaces">    </span><span class="nottickedoff">maybe False (const True) . lookup</span></span>
+<span class="lineno">   28 </span>
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>get :: [UppercaseIdentifier] -&gt; KnownContents -&gt; Maybe [LocalName]
+<span class="lineno">   31 </span>{-# INLINE get #-}
+<span class="lineno">   32 </span><span class="decl"><span class="istickedoff">get ns (KnownContents lookup) =</span>
+<span class="lineno">   33 </span><span class="spaces">    </span><span class="istickedoff">lookup <span class="nottickedoff">ns</span></span></span>
+
+</pre>
+</body>
+</html>

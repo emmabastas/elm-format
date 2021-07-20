@@ -1,0 +1,384 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    2 </span>{-# LANGUAGE GADTs #-}
+<span class="lineno">    3 </span>
+<span class="lineno">    4 </span>module Parse.Expression (term, typeAnnotation, definition, expr) where
+<span class="lineno">    5 </span>
+<span class="lineno">    6 </span>import Data.Coapplicative
+<span class="lineno">    7 </span>import qualified Data.Indexed as I
+<span class="lineno">    8 </span>import Data.Maybe (fromMaybe)
+<span class="lineno">    9 </span>import Text.Parsec hiding (newline, spaces)
+<span class="lineno">   10 </span>import Text.Parsec.Indent (block, withPos, checkIndent)
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>import qualified Parse.Binop as Binop
+<span class="lineno">   13 </span>import Parse.Helpers
+<span class="lineno">   14 </span>import Parse.Common
+<span class="lineno">   15 </span>import qualified Parse.Helpers as Help
+<span class="lineno">   16 </span>import qualified Parse.Literal as Literal
+<span class="lineno">   17 </span>import qualified Parse.Pattern as Pattern
+<span class="lineno">   18 </span>import qualified Parse.Type as Type
+<span class="lineno">   19 </span>import Parse.IParser
+<span class="lineno">   20 </span>import Parse.Whitespace
+<span class="lineno">   21 </span>
+<span class="lineno">   22 </span>import AST.V0_16
+<span class="lineno">   23 </span>import AST.Structure
+<span class="lineno">   24 </span>import ElmVersion
+<span class="lineno">   25 </span>import Reporting.Annotation (Located)
+<span class="lineno">   26 </span>import qualified Reporting.Annotation as A
+<span class="lineno">   27 </span>
+<span class="lineno">   28 </span>
+<span class="lineno">   29 </span>--------  Basic Terms  --------
+<span class="lineno">   30 </span>
+<span class="lineno">   31 </span>varTerm :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">   32 </span><span class="decl"><span class="istickedoff">varTerm elmVersion =</span>
+<span class="lineno">   33 </span><span class="spaces">    </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">   34 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   35 </span><span class="spaces">        </span><span class="istickedoff">resolve v =</span>
+<span class="lineno">   36 </span><span class="spaces">            </span><span class="istickedoff">case v of</span>
+<span class="lineno">   37 </span><span class="spaces">                </span><span class="istickedoff">TagRef [] (UppercaseIdentifier &quot;True&quot;) -&gt; Literal $ Boolean True</span>
+<span class="lineno">   38 </span><span class="spaces">                </span><span class="istickedoff">TagRef [] (UppercaseIdentifier &quot;False&quot;) -&gt; Literal $ Boolean False</span>
+<span class="lineno">   39 </span><span class="spaces">                </span><span class="istickedoff">_ -&gt; VarExpr v</span>
+<span class="lineno">   40 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">   41 </span><span class="spaces">        </span><span class="istickedoff">resolve &lt;$&gt; var elmVersion</span></span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>
+<span class="lineno">   44 </span>accessor :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">   45 </span><span class="decl"><span class="istickedoff">accessor elmVersion =</span>
+<span class="lineno">   46 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">   47 </span><span class="spaces">  </span><span class="istickedoff">do  lbl &lt;- try (string &quot;.&quot; &gt;&gt; rLabel elmVersion)</span>
+<span class="lineno">   48 </span><span class="spaces">      </span><span class="istickedoff">return $ AccessFunction lbl</span></span>
+<span class="lineno">   49 </span>
+<span class="lineno">   50 </span>
+<span class="lineno">   51 </span>negative :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">   52 </span><span class="decl"><span class="istickedoff">negative elmVersion =</span>
+<span class="lineno">   53 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">   54 </span><span class="spaces">  </span><span class="istickedoff">do  nTerm &lt;-</span>
+<span class="lineno">   55 </span><span class="spaces">          </span><span class="istickedoff">try $</span>
+<span class="lineno">   56 </span><span class="spaces">            </span><span class="istickedoff">do  _ &lt;- char '-'</span>
+<span class="lineno">   57 </span><span class="spaces">                </span><span class="istickedoff">notFollowedBy (char '.' &lt;|&gt; char '-')</span>
+<span class="lineno">   58 </span><span class="spaces">                </span><span class="istickedoff">term elmVersion</span>
+<span class="lineno">   59 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   60 </span><span class="spaces">      </span><span class="istickedoff">return $ Unary Negative nTerm</span></span>
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>
+<span class="lineno">   63 </span>--------  Complex Terms  --------
+<span class="lineno">   64 </span>
+<span class="lineno">   65 </span>listTerm :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">   66 </span><span class="decl"><span class="istickedoff">listTerm elmVersion =</span>
+<span class="lineno">   67 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">   68 </span><span class="spaces">    </span><span class="istickedoff">shader' &lt;|&gt; try (braces range) &lt;|&gt; commaSeparated</span>
+<span class="lineno">   69 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">   70 </span><span class="spaces">    </span><span class="istickedoff">range =</span>
+<span class="lineno">   71 </span><span class="spaces">      </span><span class="istickedoff">do</span>
+<span class="lineno">   72 </span><span class="spaces">          </span><span class="istickedoff">lo &lt;- expr elmVersion</span>
+<span class="lineno">   73 </span><span class="spaces">          </span><span class="istickedoff">(C (loPost, hiPre) _) &lt;- padded (string &quot;..&quot;)</span>
+<span class="lineno">   74 </span><span class="spaces">          </span><span class="istickedoff">hi &lt;- expr elmVersion</span>
+<span class="lineno">   75 </span><span class="spaces">          </span><span class="istickedoff">return $ \loPre hiPost multiline -&gt;</span>
+<span class="lineno">   76 </span><span class="spaces">              </span><span class="istickedoff">Range</span>
+<span class="lineno">   77 </span><span class="spaces">                  </span><span class="istickedoff">(C (loPre, loPost) lo)</span>
+<span class="lineno">   78 </span><span class="spaces">                  </span><span class="istickedoff">(C (hiPre, hiPost) hi)</span>
+<span class="lineno">   79 </span><span class="spaces">                  </span><span class="istickedoff">multiline</span>
+<span class="lineno">   80 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   81 </span><span class="spaces">    </span><span class="istickedoff">shader' =</span>
+<span class="lineno">   82 </span><span class="spaces">      </span><span class="istickedoff">do  rawSrc &lt;- Help.shader</span>
+<span class="lineno">   83 </span><span class="spaces">          </span><span class="istickedoff">return $ GLShader (filter (/='\r') rawSrc)</span>
+<span class="lineno">   84 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   85 </span><span class="spaces">    </span><span class="istickedoff">commaSeparated =</span>
+<span class="lineno">   86 </span><span class="spaces">        </span><span class="istickedoff">braces' $ checkMultiline $</span>
+<span class="lineno">   87 </span><span class="spaces">        </span><span class="istickedoff">do</span>
+<span class="lineno">   88 </span><span class="spaces">            </span><span class="istickedoff">(terms, trailing) &lt;- sectionedGroup (expr elmVersion)</span>
+<span class="lineno">   89 </span><span class="spaces">            </span><span class="istickedoff">return $ ExplicitList terms trailing</span></span>
+<span class="lineno">   90 </span>
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>parensTerm :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">   93 </span><span class="decl"><span class="istickedoff">parensTerm elmVersion =</span>
+<span class="lineno">   94 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $</span>
+<span class="lineno">   95 </span><span class="spaces">  </span><span class="istickedoff">choice</span>
+<span class="lineno">   96 </span><span class="spaces">    </span><span class="istickedoff">[ try (addLocation $ parens' opFn )</span>
+<span class="lineno">   97 </span><span class="spaces">    </span><span class="istickedoff">, try (addLocation $ parens' tupleFn)</span>
+<span class="lineno">   98 </span><span class="spaces">    </span><span class="istickedoff">, do</span>
+<span class="lineno">   99 </span><span class="spaces">          </span><span class="istickedoff">(start, e, end) &lt;- located $ parens (parened &lt;|&gt; unit)</span>
+<span class="lineno">  100 </span><span class="spaces">          </span><span class="istickedoff">return $ A.at start end e</span>
+<span class="lineno">  101 </span><span class="spaces">    </span><span class="istickedoff">]</span>
+<span class="lineno">  102 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  103 </span><span class="spaces">    </span><span class="istickedoff">opFn =</span>
+<span class="lineno">  104 </span><span class="spaces">      </span><span class="istickedoff">VarExpr &lt;$&gt; anyOp <span class="nottickedoff">elmVersion</span></span>
+<span class="lineno">  105 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  106 </span><span class="spaces">    </span><span class="istickedoff">tupleFn =</span>
+<span class="lineno">  107 </span><span class="spaces">      </span><span class="istickedoff">do  commas &lt;- many1 comma</span>
+<span class="lineno">  108 </span><span class="spaces">          </span><span class="istickedoff">return $ TupleFunction (length commas + 1)</span>
+<span class="lineno">  109 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  110 </span><span class="spaces">    </span><span class="istickedoff">parened =</span>
+<span class="lineno">  111 </span><span class="spaces">      </span><span class="istickedoff">do  expressions &lt;- commaSep1 ((\e a b -&gt; C (a, b) e) &lt;$&gt; expr elmVersion)</span>
+<span class="lineno">  112 </span><span class="spaces">          </span><span class="istickedoff">return $ \pre post multiline -&gt;</span>
+<span class="lineno">  113 </span><span class="spaces">            </span><span class="istickedoff">case expressions pre post of</span>
+<span class="lineno">  114 </span><span class="spaces">              </span><span class="istickedoff">[single] -&gt;</span>
+<span class="lineno">  115 </span><span class="spaces">                  </span><span class="istickedoff">Parens single</span>
+<span class="lineno">  116 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  117 </span><span class="spaces">              </span><span class="istickedoff">expressions' -&gt;</span>
+<span class="lineno">  118 </span><span class="spaces">                  </span><span class="istickedoff">Tuple expressions' multiline</span>
+<span class="lineno">  119 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  120 </span><span class="spaces">    </span><span class="istickedoff">unit =</span>
+<span class="lineno">  121 </span><span class="spaces">        </span><span class="istickedoff">return $ \pre post _ -&gt; Unit (pre ++ post)</span></span>
+<span class="lineno">  122 </span>
+<span class="lineno">  123 </span>
+<span class="lineno">  124 </span>recordTerm :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  125 </span><span class="decl"><span class="istickedoff">recordTerm elmVersion =</span>
+<span class="lineno">  126 </span><span class="spaces">    </span><span class="istickedoff">fmap I.Fix $</span>
+<span class="lineno">  127 </span><span class="spaces">    </span><span class="istickedoff">addLocation $ brackets' $ checkMultiline $</span>
+<span class="lineno">  128 </span><span class="spaces">        </span><span class="istickedoff">do</span>
+<span class="lineno">  129 </span><span class="spaces">            </span><span class="istickedoff">base &lt;- optionMaybe $ try (commented (lowVar elmVersion) &lt;* string &quot;|&quot;)</span>
+<span class="lineno">  130 </span><span class="spaces">            </span><span class="istickedoff">(fields, trailing) &lt;- sectionedGroup (pair (lowVar elmVersion) lenientEquals (expr elmVersion))</span>
+<span class="lineno">  131 </span><span class="spaces">            </span><span class="istickedoff">return $ Record base fields trailing</span></span>
+<span class="lineno">  132 </span>
+<span class="lineno">  133 </span>
+<span class="lineno">  134 </span>term :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  135 </span><span class="decl"><span class="istickedoff">term elmVersion =</span>
+<span class="lineno">  136 </span><span class="spaces">  </span><span class="istickedoff">(choice</span>
+<span class="lineno">  137 </span><span class="spaces">      </span><span class="istickedoff">[ fmap I.Fix $ addLocation (Literal &lt;$&gt; Literal.literal)</span>
+<span class="lineno">  138 </span><span class="spaces">      </span><span class="istickedoff">, listTerm elmVersion</span>
+<span class="lineno">  139 </span><span class="spaces">      </span><span class="istickedoff">, accessor elmVersion</span>
+<span class="lineno">  140 </span><span class="spaces">      </span><span class="istickedoff">, negative elmVersion</span>
+<span class="lineno">  141 </span><span class="spaces">      </span><span class="istickedoff">]</span>
+<span class="lineno">  142 </span><span class="spaces">  </span><span class="istickedoff">)</span>
+<span class="lineno">  143 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; accessible elmVersion</span>
+<span class="lineno">  144 </span><span class="spaces">        </span><span class="istickedoff">(varTerm elmVersion</span>
+<span class="lineno">  145 </span><span class="spaces">            </span><span class="istickedoff">&lt;|&gt; parensTerm elmVersion</span>
+<span class="lineno">  146 </span><span class="spaces">            </span><span class="istickedoff">&lt;|&gt; recordTerm elmVersion</span>
+<span class="lineno">  147 </span><span class="spaces">        </span><span class="istickedoff">)</span>
+<span class="lineno">  148 </span><span class="spaces">    </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;an expression&quot;</span></span></span>
+<span class="lineno">  149 </span>
+<span class="lineno">  150 </span>
+<span class="lineno">  151 </span>--------  Applications  --------
+<span class="lineno">  152 </span>
+<span class="lineno">  153 </span>head' :: [a] -&gt; Maybe a
+<span class="lineno">  154 </span><span class="decl"><span class="istickedoff">head' [] = <span class="nottickedoff">Nothing</span></span>
+<span class="lineno">  155 </span><span class="spaces"></span><span class="istickedoff">head' (a:_) = Just a</span></span>
+<span class="lineno">  156 </span>
+<span class="lineno">  157 </span>
+<span class="lineno">  158 </span>appExpr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  159 </span><span class="decl"><span class="istickedoff">appExpr elmVersion =</span>
+<span class="lineno">  160 </span><span class="spaces">  </span><span class="istickedoff">expecting <span class="nottickedoff">&quot;an expression&quot;</span> $</span>
+<span class="lineno">  161 </span><span class="spaces">  </span><span class="istickedoff">do  start &lt;- getMyPosition</span>
+<span class="lineno">  162 </span><span class="spaces">      </span><span class="istickedoff">(t, initialTermMultiline) &lt;- trackNewline (term elmVersion)</span>
+<span class="lineno">  163 </span><span class="spaces">      </span><span class="istickedoff">ts &lt;- constrainedSpacePrefix (term elmVersion)</span>
+<span class="lineno">  164 </span><span class="spaces">      </span><span class="istickedoff">end &lt;- getMyPosition</span>
+<span class="lineno">  165 </span><span class="spaces">      </span><span class="istickedoff">return $</span>
+<span class="lineno">  166 </span><span class="spaces">          </span><span class="istickedoff">case ts of</span>
+<span class="lineno">  167 </span><span class="spaces">            </span><span class="istickedoff">[] -&gt;</span>
+<span class="lineno">  168 </span><span class="spaces">              </span><span class="istickedoff">t</span>
+<span class="lineno">  169 </span><span class="spaces">            </span><span class="istickedoff">_  -&gt;</span>
+<span class="lineno">  170 </span><span class="spaces">                </span><span class="istickedoff">let</span>
+<span class="lineno">  171 </span><span class="spaces">                    </span><span class="istickedoff">multiline =</span>
+<span class="lineno">  172 </span><span class="spaces">                        </span><span class="istickedoff">case</span>
+<span class="lineno">  173 </span><span class="spaces">                            </span><span class="istickedoff">( initialTermMultiline</span>
+<span class="lineno">  174 </span><span class="spaces">                            </span><span class="istickedoff">, fromMaybe <span class="nottickedoff">(JoinAll)</span> $ fmap snd $ head' ts</span>
+<span class="lineno">  175 </span><span class="spaces">                            </span><span class="istickedoff">, any (isMultiline . snd) $ tail ts</span>
+<span class="lineno">  176 </span><span class="spaces">                            </span><span class="istickedoff">)</span>
+<span class="lineno">  177 </span><span class="spaces">                        </span><span class="istickedoff">of</span>
+<span class="lineno">  178 </span><span class="spaces">                            </span><span class="istickedoff">(SplitAll, _, _ ) -&gt; FASplitFirst</span>
+<span class="lineno">  179 </span><span class="spaces">                            </span><span class="istickedoff">(JoinAll, JoinAll, True) -&gt; FAJoinFirst SplitAll</span>
+<span class="lineno">  180 </span><span class="spaces">                            </span><span class="istickedoff">(JoinAll, JoinAll, False) -&gt; FAJoinFirst JoinAll</span>
+<span class="lineno">  181 </span><span class="spaces">                            </span><span class="istickedoff">(JoinAll, SplitAll, _) -&gt; FASplitFirst</span>
+<span class="lineno">  182 </span><span class="spaces">                </span><span class="istickedoff">in</span>
+<span class="lineno">  183 </span><span class="spaces">                    </span><span class="istickedoff">I.Fix $ A.at start end $ App t (fmap fst ts) multiline</span></span>
+<span class="lineno">  184 </span>
+<span class="lineno">  185 </span>
+<span class="lineno">  186 </span>--------  Normal Expressions  --------
+<span class="lineno">  187 </span>
+<span class="lineno">  188 </span>expr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  189 </span><span class="decl"><span class="istickedoff">expr elmVersion =</span>
+<span class="lineno">  190 </span><span class="spaces">  </span><span class="istickedoff">choice [ letExpr elmVersion, caseExpr elmVersion, ifExpr elmVersion ]</span>
+<span class="lineno">  191 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; lambdaExpr elmVersion</span>
+<span class="lineno">  192 </span><span class="spaces">    </span><span class="istickedoff">&lt;|&gt; binaryExpr elmVersion</span>
+<span class="lineno">  193 </span><span class="spaces">    </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;an expression&quot;</span></span></span>
+<span class="lineno">  194 </span>
+<span class="lineno">  195 </span>
+<span class="lineno">  196 </span>binaryExpr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  197 </span><span class="decl"><span class="istickedoff">binaryExpr elmVersion =</span>
+<span class="lineno">  198 </span><span class="spaces">    </span><span class="istickedoff">Binop.binops (appExpr elmVersion) lastExpr (anyOp elmVersion)</span>
+<span class="lineno">  199 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  200 </span><span class="spaces">    </span><span class="istickedoff">lastExpr =</span>
+<span class="lineno">  201 </span><span class="spaces">        </span><span class="istickedoff">choice [ letExpr <span class="nottickedoff">elmVersion</span>, caseExpr <span class="nottickedoff">elmVersion</span>, ifExpr elmVersion ]</span>
+<span class="lineno">  202 </span><span class="spaces">        </span><span class="istickedoff">&lt;|&gt; lambdaExpr elmVersion</span>
+<span class="lineno">  203 </span><span class="spaces">        </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;an expression&quot;</span></span></span>
+<span class="lineno">  204 </span>
+<span class="lineno">  205 </span>
+<span class="lineno">  206 </span>ifExpr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  207 </span><span class="decl"><span class="istickedoff">ifExpr elmVersion =</span>
+<span class="lineno">  208 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">  209 </span><span class="spaces">    </span><span class="istickedoff">elseKeyword =</span>
+<span class="lineno">  210 </span><span class="spaces">      </span><span class="istickedoff">(reserved elmVersion &quot;else&quot; &lt;?&gt; <span class="nottickedoff">&quot;an 'else' branch&quot;</span>)</span>
+<span class="lineno">  211 </span><span class="spaces">        </span><span class="istickedoff">&gt;&gt; whitespace</span>
+<span class="lineno">  212 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">  213 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">  214 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">  215 </span><span class="spaces">      </span><span class="istickedoff">first &lt;- ifClause elmVersion</span>
+<span class="lineno">  216 </span><span class="spaces">      </span><span class="istickedoff">rest &lt;- many (try $ C &lt;$&gt; elseKeyword &lt;*&gt; ifClause elmVersion)</span>
+<span class="lineno">  217 </span><span class="spaces">      </span><span class="istickedoff">final &lt;- C &lt;$&gt; elseKeyword &lt;*&gt; expr elmVersion</span>
+<span class="lineno">  218 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  219 </span><span class="spaces">      </span><span class="istickedoff">return $ If first rest final</span></span>
+<span class="lineno">  220 </span>
+<span class="lineno">  221 </span>
+<span class="lineno">  222 </span>ifClause :: ElmVersion -&gt; IParser (IfClause (ASTNS Located [UppercaseIdentifier] 'ExpressionNK))
+<span class="lineno">  223 </span><span class="decl"><span class="istickedoff">ifClause elmVersion =</span>
+<span class="lineno">  224 </span><span class="spaces">  </span><span class="istickedoff">do</span>
+<span class="lineno">  225 </span><span class="spaces">    </span><span class="istickedoff">try (reserved elmVersion &quot;if&quot;)</span>
+<span class="lineno">  226 </span><span class="spaces">    </span><span class="istickedoff">preCondition &lt;- whitespace</span>
+<span class="lineno">  227 </span><span class="spaces">    </span><span class="istickedoff">condition &lt;- expr elmVersion</span>
+<span class="lineno">  228 </span><span class="spaces">    </span><span class="istickedoff">(C (postCondition, bodyComments) _) &lt;- padded (reserved elmVersion &quot;then&quot;)</span>
+<span class="lineno">  229 </span><span class="spaces">    </span><span class="istickedoff">thenBranch &lt;- expr elmVersion</span>
+<span class="lineno">  230 </span><span class="spaces">    </span><span class="istickedoff">preElse &lt;- whitespace &lt;?&gt; <span class="nottickedoff">&quot;an 'else' branch&quot;</span></span>
+<span class="lineno">  231 </span><span class="spaces">    </span><span class="istickedoff">return $ IfClause</span>
+<span class="lineno">  232 </span><span class="spaces">      </span><span class="istickedoff">(C (preCondition, postCondition) condition)</span>
+<span class="lineno">  233 </span><span class="spaces">      </span><span class="istickedoff">(C (bodyComments, preElse) thenBranch)</span></span>
+<span class="lineno">  234 </span>
+<span class="lineno">  235 </span>
+<span class="lineno">  236 </span>lambdaExpr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  237 </span><span class="decl"><span class="istickedoff">lambdaExpr elmVersion =</span>
+<span class="lineno">  238 </span><span class="spaces">  </span><span class="istickedoff">let</span>
+<span class="lineno">  239 </span><span class="spaces">    </span><span class="istickedoff">subparser = do</span>
+<span class="lineno">  240 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- char '\\' &lt;|&gt; char '\x03BB' &lt;?&gt; <span class="nottickedoff">&quot;an anonymous function&quot;</span></span>
+<span class="lineno">  241 </span><span class="spaces">      </span><span class="istickedoff">args &lt;- spacePrefix (Pattern.term elmVersion)</span>
+<span class="lineno">  242 </span><span class="spaces">      </span><span class="istickedoff">(C (preArrowComments, bodyComments) _) &lt;- padded rightArrow</span>
+<span class="lineno">  243 </span><span class="spaces">      </span><span class="istickedoff">body &lt;- expr elmVersion</span>
+<span class="lineno">  244 </span><span class="spaces">      </span><span class="istickedoff">return (args, preArrowComments, bodyComments, body)</span>
+<span class="lineno">  245 </span><span class="spaces">  </span><span class="istickedoff">in</span>
+<span class="lineno">  246 </span><span class="spaces">    </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">  247 </span><span class="spaces">        </span><span class="istickedoff">do  ((args, preArrowComments, bodyComments, body), multiline) &lt;- trackNewline subparser</span>
+<span class="lineno">  248 </span><span class="spaces">            </span><span class="istickedoff">return $ Lambda args (preArrowComments ++ bodyComments) body $ multilineToBool multiline</span></span>
+<span class="lineno">  249 </span>
+<span class="lineno">  250 </span>
+<span class="lineno">  251 </span>caseExpr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  252 </span><span class="decl"><span class="istickedoff">caseExpr elmVersion =</span>
+<span class="lineno">  253 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">  254 </span><span class="spaces">  </span><span class="istickedoff">do  try (reserved elmVersion &quot;case&quot;)</span>
+<span class="lineno">  255 </span><span class="spaces">      </span><span class="istickedoff">(e, multilineSubject) &lt;- trackNewline $ padded (expr elmVersion)</span>
+<span class="lineno">  256 </span><span class="spaces">      </span><span class="istickedoff">reserved elmVersion &quot;of&quot;</span>
+<span class="lineno">  257 </span><span class="spaces">      </span><span class="istickedoff">firstPatternComments &lt;- whitespace</span>
+<span class="lineno">  258 </span><span class="spaces">      </span><span class="istickedoff">result &lt;- cases firstPatternComments</span>
+<span class="lineno">  259 </span><span class="spaces">      </span><span class="istickedoff">return $ Case (e, multilineToBool multilineSubject) result</span>
+<span class="lineno">  260 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  261 </span><span class="spaces">    </span><span class="istickedoff">case_ preComments =</span>
+<span class="lineno">  262 </span><span class="spaces">      </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">  263 </span><span class="spaces">      </span><span class="istickedoff">do</span>
+<span class="lineno">  264 </span><span class="spaces">          </span><span class="istickedoff">(patternComments, p, C (preArrowComments, bodyComments) _) &lt;-</span>
+<span class="lineno">  265 </span><span class="spaces">              </span><span class="istickedoff">try ((,,)</span>
+<span class="lineno">  266 </span><span class="spaces">                  </span><span class="istickedoff">&lt;$&gt; whitespace</span>
+<span class="lineno">  267 </span><span class="spaces">                  </span><span class="istickedoff">&lt;*&gt; (checkIndent &gt;&gt; Pattern.expr elmVersion)</span>
+<span class="lineno">  268 </span><span class="spaces">                  </span><span class="istickedoff">&lt;*&gt; padded rightArrow</span>
+<span class="lineno">  269 </span><span class="spaces">                  </span><span class="istickedoff">)</span>
+<span class="lineno">  270 </span><span class="spaces">          </span><span class="istickedoff">result &lt;- expr elmVersion</span>
+<span class="lineno">  271 </span><span class="spaces">          </span><span class="istickedoff">return $ CaseBranch</span>
+<span class="lineno">  272 </span><span class="spaces">              </span><span class="istickedoff">{ beforePattern = preComments ++ patternComments</span>
+<span class="lineno">  273 </span><span class="spaces">              </span><span class="istickedoff">, beforeArrow = preArrowComments</span>
+<span class="lineno">  274 </span><span class="spaces">              </span><span class="istickedoff">, afterArrow = bodyComments</span>
+<span class="lineno">  275 </span><span class="spaces">              </span><span class="istickedoff">, pattern = p</span>
+<span class="lineno">  276 </span><span class="spaces">              </span><span class="istickedoff">, body = result</span>
+<span class="lineno">  277 </span><span class="spaces">              </span><span class="istickedoff">}</span>
+<span class="lineno">  278 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  279 </span><span class="spaces">    </span><span class="istickedoff">cases preComments =</span>
+<span class="lineno">  280 </span><span class="spaces">        </span><span class="istickedoff">withPos $</span>
+<span class="lineno">  281 </span><span class="spaces">            </span><span class="istickedoff">do</span>
+<span class="lineno">  282 </span><span class="spaces">                </span><span class="istickedoff">r1 &lt;- case_ preComments</span>
+<span class="lineno">  283 </span><span class="spaces">                </span><span class="istickedoff">r &lt;- many $ case_ []</span>
+<span class="lineno">  284 </span><span class="spaces">                </span><span class="istickedoff">return $ r1:r</span></span>
+<span class="lineno">  285 </span>
+<span class="lineno">  286 </span>
+<span class="lineno">  287 </span>
+<span class="lineno">  288 </span>-- LET
+<span class="lineno">  289 </span>
+<span class="lineno">  290 </span>
+<span class="lineno">  291 </span>letExpr :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  292 </span><span class="decl"><span class="istickedoff">letExpr elmVersion =</span>
+<span class="lineno">  293 </span><span class="spaces">  </span><span class="istickedoff">fmap I.Fix $ addLocation $</span>
+<span class="lineno">  294 </span><span class="spaces">  </span><span class="istickedoff">do  try (reserved elmVersion &quot;let&quot;)</span>
+<span class="lineno">  295 </span><span class="spaces">      </span><span class="istickedoff">A.A cal commentsAfterLet' &lt;- addLocation whitespace</span>
+<span class="lineno">  296 </span><span class="spaces">      </span><span class="istickedoff">let commentsAfterLet = fmap (I.Fix . A.A cal . LetComment) commentsAfterLet'</span>
+<span class="lineno">  297 </span><span class="spaces">      </span><span class="istickedoff">defs &lt;-</span>
+<span class="lineno">  298 </span><span class="spaces">        </span><span class="istickedoff">block $</span>
+<span class="lineno">  299 </span><span class="spaces">          </span><span class="istickedoff">do  def &lt;- fmap I.Fix $ addLocation $ fmap (LetCommonDeclaration . I.Fix) $ addLocation (typeAnnotation elmVersion TypeAnnotation &lt;|&gt; definition elmVersion Definition)</span>
+<span class="lineno">  300 </span><span class="spaces">              </span><span class="istickedoff">A.A cad commentsAfterDef' &lt;- addLocation whitespace</span>
+<span class="lineno">  301 </span><span class="spaces">              </span><span class="istickedoff">let commentsAfterDef = fmap (I.Fix . A.A cad . LetComment) commentsAfterDef'</span>
+<span class="lineno">  302 </span><span class="spaces">              </span><span class="istickedoff">return (def : commentsAfterDef)</span>
+<span class="lineno">  303 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- reserved elmVersion &quot;in&quot;</span>
+<span class="lineno">  304 </span><span class="spaces">      </span><span class="istickedoff">bodyComments &lt;- whitespace</span>
+<span class="lineno">  305 </span><span class="spaces">      </span><span class="istickedoff">Let (commentsAfterLet ++ concat defs) bodyComments &lt;$&gt; expr elmVersion</span></span>
+<span class="lineno">  306 </span>
+<span class="lineno">  307 </span>
+<span class="lineno">  308 </span>
+<span class="lineno">  309 </span>-- TYPE ANNOTATION
+<span class="lineno">  310 </span>
+<span class="lineno">  311 </span>typeAnnotation :: ElmVersion -&gt; (C1 after (Ref ()) -&gt; C1 before (ASTNS Located [UppercaseIdentifier] 'TypeNK) -&gt; a) -&gt; IParser a
+<span class="lineno">  312 </span><span class="decl"><span class="istickedoff">typeAnnotation elmVersion fn =</span>
+<span class="lineno">  313 </span><span class="spaces">    </span><span class="istickedoff">(\(v, pre, post) e -&gt; fn (C pre v) (C post e)) &lt;$&gt; try start &lt;*&gt; Type.expr elmVersion</span>
+<span class="lineno">  314 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  315 </span><span class="spaces">    </span><span class="istickedoff">start =</span>
+<span class="lineno">  316 </span><span class="spaces">      </span><span class="istickedoff">do  v &lt;- (VarRef () &lt;$&gt; lowVar elmVersion) &lt;|&gt; (OpRef &lt;$&gt; symOpInParens)</span>
+<span class="lineno">  317 </span><span class="spaces">          </span><span class="istickedoff">(C (preColon, postColon) _) &lt;- padded hasType</span>
+<span class="lineno">  318 </span><span class="spaces">          </span><span class="istickedoff">return (v, preColon, postColon)</span></span>
+<span class="lineno">  319 </span>
+<span class="lineno">  320 </span>
+<span class="lineno">  321 </span>-- DEFINITION
+<span class="lineno">  322 </span>
+<span class="lineno">  323 </span>definition ::
+<span class="lineno">  324 </span>    ElmVersion
+<span class="lineno">  325 </span>    -&gt;
+<span class="lineno">  326 </span>        (ASTNS Located [UppercaseIdentifier] 'PatternNK
+<span class="lineno">  327 </span>          -&gt; [C1 before (ASTNS Located [UppercaseIdentifier] 'PatternNK)]
+<span class="lineno">  328 </span>          -&gt; Comments
+<span class="lineno">  329 </span>          -&gt; (ASTNS Located [UppercaseIdentifier] 'ExpressionNK)
+<span class="lineno">  330 </span>          -&gt; a
+<span class="lineno">  331 </span>        )
+<span class="lineno">  332 </span>    -&gt; IParser a
+<span class="lineno">  333 </span><span class="decl"><span class="istickedoff">definition elmVersion fn =</span>
+<span class="lineno">  334 </span><span class="spaces">  </span><span class="istickedoff">withPos $</span>
+<span class="lineno">  335 </span><span class="spaces">    </span><span class="istickedoff">do</span>
+<span class="lineno">  336 </span><span class="spaces">        </span><span class="istickedoff">(name, args) &lt;- defStart elmVersion</span>
+<span class="lineno">  337 </span><span class="spaces">        </span><span class="istickedoff">(C (preEqualsComments, postEqualsComments) _) &lt;- padded equals</span>
+<span class="lineno">  338 </span><span class="spaces">        </span><span class="istickedoff">body &lt;- expr elmVersion</span>
+<span class="lineno">  339 </span><span class="spaces">        </span><span class="istickedoff">return $ fn name args (preEqualsComments ++ postEqualsComments) body</span></span>
+<span class="lineno">  340 </span>
+<span class="lineno">  341 </span>
+<span class="lineno">  342 </span>defStart :: ElmVersion -&gt; IParser (ASTNS Located [UppercaseIdentifier] 'PatternNK, [C1 before (ASTNS Located [UppercaseIdentifier] 'PatternNK)])
+<span class="lineno">  343 </span><span class="decl"><span class="istickedoff">defStart elmVersion =</span>
+<span class="lineno">  344 </span><span class="spaces">    </span><span class="istickedoff">choice</span>
+<span class="lineno">  345 </span><span class="spaces">      </span><span class="istickedoff">[ do  pattern &lt;- try $ Pattern.term elmVersion</span>
+<span class="lineno">  346 </span><span class="spaces">            </span><span class="istickedoff">func $ pattern</span>
+<span class="lineno">  347 </span><span class="spaces">      </span><span class="istickedoff">, do  opPattern &lt;- fmap I.Fix $ addLocation (OpPattern &lt;$&gt; parens' symOp)</span>
+<span class="lineno">  348 </span><span class="spaces">            </span><span class="istickedoff">func opPattern</span>
+<span class="lineno">  349 </span><span class="spaces">      </span><span class="istickedoff">]</span>
+<span class="lineno">  350 </span><span class="spaces">      </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;the definition of a variable (x = ...)&quot;</span></span>
+<span class="lineno">  351 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  352 </span><span class="spaces">    </span><span class="istickedoff">func pattern =</span>
+<span class="lineno">  353 </span><span class="spaces">        </span><span class="istickedoff">case extract $ I.unFix pattern of</span>
+<span class="lineno">  354 </span><span class="spaces">          </span><span class="istickedoff">VarPattern _ -&gt;</span>
+<span class="lineno">  355 </span><span class="spaces">              </span><span class="istickedoff">((,) pattern) &lt;$&gt; spacePrefix (Pattern.term elmVersion)</span>
+<span class="lineno">  356 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  357 </span><span class="spaces">          </span><span class="istickedoff">OpPattern _ -&gt;</span>
+<span class="lineno">  358 </span><span class="spaces">              </span><span class="istickedoff">((,) pattern) &lt;$&gt; spacePrefix (Pattern.term elmVersion)</span>
+<span class="lineno">  359 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  360 </span><span class="spaces">          </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  361 </span><span class="spaces">              </span><span class="istickedoff">return (pattern, [])</span></span>
+
+</pre>
+</body>
+</html>

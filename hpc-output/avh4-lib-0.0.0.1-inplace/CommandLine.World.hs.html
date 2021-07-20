@@ -1,0 +1,86 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE TypeFamilies #-}
+<span class="lineno">    2 </span>module CommandLine.World where
+<span class="lineno">    3 </span>
+<span class="lineno">    4 </span>import Prelude ()
+<span class="lineno">    5 </span>import Relude hiding (getLine, putStr)
+<span class="lineno">    6 </span>
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>data FileType
+<span class="lineno">    9 </span>    = IsFile
+<span class="lineno">   10 </span>    | IsDirectory
+<span class="lineno">   11 </span>    | DoesNotExist
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>
+<span class="lineno">   14 </span>class Monad m =&gt; World m where
+<span class="lineno">   15 </span>    readUtf8File :: FilePath -&gt; m Text
+<span class="lineno">   16 </span>    readUtf8FileWithPath :: FilePath -&gt; m (FilePath, Text)
+<span class="lineno">   17 </span>    <span class="decl"><span class="istickedoff">readUtf8FileWithPath filePath =</span>
+<span class="lineno">   18 </span><span class="spaces">        </span><span class="istickedoff">(,) filePath &lt;$&gt; readUtf8File filePath</span></span>
+<span class="lineno">   19 </span>    writeUtf8File :: FilePath -&gt; Text -&gt; m ()
+<span class="lineno">   20 </span>    writeUtf8FileNoOverwrite :: FilePath -&gt; Text -&gt; m ()
+<span class="lineno">   21 </span>    <span class="decl"><span class="nottickedoff">writeUtf8FileNoOverwrite path content =</span>
+<span class="lineno">   22 </span><span class="spaces">        </span><span class="nottickedoff">do</span>
+<span class="lineno">   23 </span><span class="spaces">            </span><span class="nottickedoff">exists &lt;- doesFileExist path</span>
+<span class="lineno">   24 </span><span class="spaces">            </span><span class="nottickedoff">case exists of</span>
+<span class="lineno">   25 </span><span class="spaces">                </span><span class="nottickedoff">True -&gt;</span>
+<span class="lineno">   26 </span><span class="spaces">                    </span><span class="nottickedoff">error &quot;file exists and was not marked to be overwritten&quot;</span>
+<span class="lineno">   27 </span><span class="spaces">                </span><span class="nottickedoff">False -&gt;</span>
+<span class="lineno">   28 </span><span class="spaces">                    </span><span class="nottickedoff">writeUtf8File path content</span></span>
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>    doesFileExist :: FilePath -&gt; m Bool
+<span class="lineno">   31 </span>    doesDirectoryExist :: FilePath -&gt; m Bool
+<span class="lineno">   32 </span>    listDirectory :: FilePath -&gt; m [FilePath]
+<span class="lineno">   33 </span>    stat :: FilePath -&gt; m FileType
+<span class="lineno">   34 </span>    <span class="decl"><span class="istickedoff">stat path =</span>
+<span class="lineno">   35 </span><span class="spaces">        </span><span class="istickedoff">do</span>
+<span class="lineno">   36 </span><span class="spaces">            </span><span class="istickedoff">isFile &lt;- doesFileExist path</span>
+<span class="lineno">   37 </span><span class="spaces">            </span><span class="istickedoff">isDirectory &lt;- doesDirectoryExist path</span>
+<span class="lineno">   38 </span><span class="spaces">            </span><span class="istickedoff">return $ case ( isFile, isDirectory ) of</span>
+<span class="lineno">   39 </span><span class="spaces">                </span><span class="istickedoff">( True, _ ) -&gt; IsFile</span>
+<span class="lineno">   40 </span><span class="spaces">                </span><span class="istickedoff">( _, True ) -&gt; IsDirectory</span>
+<span class="lineno">   41 </span><span class="spaces">                </span><span class="istickedoff">( False, False ) -&gt; DoesNotExist</span></span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>    getProgName :: m Text
+<span class="lineno">   44 </span>
+<span class="lineno">   45 </span>    getStdin :: m Text
+<span class="lineno">   46 </span>    getLine :: m Text
+<span class="lineno">   47 </span>    getYesOrNo :: m Bool
+<span class="lineno">   48 </span>    <span class="decl"><span class="istickedoff">getYesOrNo =</span>
+<span class="lineno">   49 </span><span class="spaces">      </span><span class="istickedoff">do  flushStdout</span>
+<span class="lineno">   50 </span><span class="spaces">          </span><span class="istickedoff">input &lt;- getLine</span>
+<span class="lineno">   51 </span><span class="spaces">          </span><span class="istickedoff">case input of</span>
+<span class="lineno">   52 </span><span class="spaces">            </span><span class="istickedoff">&quot;y&quot; -&gt; return True</span>
+<span class="lineno">   53 </span><span class="spaces">            </span><span class="istickedoff">&quot;n&quot; -&gt; return False</span>
+<span class="lineno">   54 </span><span class="spaces">            </span><span class="istickedoff">_   -&gt; <span class="nottickedoff">putStr &quot;Must type 'y' for yes or 'n' for no: &quot; *&gt; getYesOrNo</span></span></span>
+<span class="lineno">   55 </span>    putStr :: Text -&gt; m ()
+<span class="lineno">   56 </span>    putStrLn :: Text -&gt; m ()
+<span class="lineno">   57 </span>    writeStdout :: Text -&gt; m ()
+<span class="lineno">   58 </span>    flushStdout :: m ()
+<span class="lineno">   59 </span>    putStrStderr :: Text -&gt; m ()
+<span class="lineno">   60 </span>    putStrLnStderr :: Text -&gt; m()
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>    exitFailure :: m ()
+<span class="lineno">   63 </span>    exitSuccess :: m ()
+
+</pre>
+</body>
+</html>

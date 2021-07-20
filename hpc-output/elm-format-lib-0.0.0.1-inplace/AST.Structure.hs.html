@@ -1,0 +1,182 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE Rank2Types #-}
+<span class="lineno">    2 </span>{-# LANGUAGE TypeFamilies #-}
+<span class="lineno">    3 </span>{-# LANGUAGE FlexibleInstances #-}
+<span class="lineno">    4 </span>{-# LANGUAGE StandaloneDeriving #-}
+<span class="lineno">    5 </span>{-# LANGUAGE UndecidableInstances #-}
+<span class="lineno">    6 </span>{-# LANGUAGE FunctionalDependencies #-}
+<span class="lineno">    7 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    8 </span>{-# LANGUAGE PolyKinds #-}
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>module AST.Structure
+<span class="lineno">   11 </span>    ( FixAST, ASTNS, ASTNS1
+<span class="lineno">   12 </span>    , foldReferences
+<span class="lineno">   13 </span>    , bottomUpReferences
+<span class="lineno">   14 </span>    , mapNs
+<span class="lineno">   15 </span>    ) where
+<span class="lineno">   16 </span>
+<span class="lineno">   17 </span>
+<span class="lineno">   18 </span>import Data.Coapplicative
+<span class="lineno">   19 </span>import Data.Foldable (fold)
+<span class="lineno">   20 </span>import Data.Functor.Const
+<span class="lineno">   21 </span>import AST.V0_16
+<span class="lineno">   22 </span>import qualified Data.Indexed as I
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>
+<span class="lineno">   25 </span>-- FixAST :: (* -&gt; *) -&gt; * -&gt; * -&gt; * -&gt; NodeKind -&gt; *
+<span class="lineno">   26 </span>type FixAST annf typeRef ctorRef varRef =
+<span class="lineno">   27 </span>    I.Fix annf (AST typeRef ctorRef varRef)
+<span class="lineno">   28 </span>
+<span class="lineno">   29 </span>-- ASTNS :: (* -&gt; *) -&gt; * -&gt; NodeKind -&gt; *
+<span class="lineno">   30 </span>type ASTNS annf ns =
+<span class="lineno">   31 </span>    FixAST annf (ns, UppercaseIdentifier) (ns, UppercaseIdentifier) (Ref ns)
+<span class="lineno">   32 </span>
+<span class="lineno">   33 </span>-- This is the same as ASTNS, but with the first level unFix'ed
+<span class="lineno">   34 </span>-- ASTNS1 :: (* -&gt; *) -&gt; * -&gt; NodeKind -&gt; *
+<span class="lineno">   35 </span>type ASTNS1 annf ns =
+<span class="lineno">   36 </span>    AST
+<span class="lineno">   37 </span>        (ns, UppercaseIdentifier)
+<span class="lineno">   38 </span>        (ns, UppercaseIdentifier)
+<span class="lineno">   39 </span>        (Ref ns)
+<span class="lineno">   40 </span>        (ASTNS annf ns)
+<span class="lineno">   41 </span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>bottomUpReferences ::
+<span class="lineno">   44 </span>    (Functor annf) =&gt;
+<span class="lineno">   45 </span>    (typeRef1 -&gt; typeRef2)
+<span class="lineno">   46 </span>    -&gt; (ctorRef1 -&gt; ctorRef2)
+<span class="lineno">   47 </span>    -&gt; (varRef1 -&gt; varRef2)
+<span class="lineno">   48 </span>    -&gt; (forall kind.
+<span class="lineno">   49 </span>        FixAST annf typeRef1 ctorRef1 varRef1 kind
+<span class="lineno">   50 </span>        -&gt; FixAST annf typeRef2 ctorRef2 varRef2 kind
+<span class="lineno">   51 </span>       )
+<span class="lineno">   52 </span><span class="decl"><span class="istickedoff">bottomUpReferences ftr fcr fvr =</span>
+<span class="lineno">   53 </span><span class="spaces">    </span><span class="istickedoff">I.cata (I.Fix . fmap (mapAll ftr fcr fvr id))</span></span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>
+<span class="lineno">   56 </span>foldReferences ::
+<span class="lineno">   57 </span>    forall a annf typeRef ctorRef varRef kind.
+<span class="lineno">   58 </span>    (Monoid a, Coapplicative annf) =&gt;
+<span class="lineno">   59 </span>    (typeRef -&gt; a) -&gt; (ctorRef -&gt; a) -&gt; (varRef -&gt; a)
+<span class="lineno">   60 </span>    -&gt; FixAST annf typeRef ctorRef varRef kind -&gt; a
+<span class="lineno">   61 </span><span class="decl"><span class="nottickedoff">foldReferences ftype fctor fvar =</span>
+<span class="lineno">   62 </span><span class="spaces">    </span><span class="nottickedoff">getConst . I.cata (foldNode  . extract)</span>
+<span class="lineno">   63 </span><span class="spaces">    </span><span class="nottickedoff">where</span>
+<span class="lineno">   64 </span><span class="spaces">        </span><span class="nottickedoff">-- This is kinda confusing, but we use the Const type constructor to merge all the different NodeKinds into a single type `a`</span>
+<span class="lineno">   65 </span><span class="spaces">        </span><span class="nottickedoff">-- See http://www.timphilipwilliams.com/posts/2013-01-16-fixing-gadts.html for relevant details.</span>
+<span class="lineno">   66 </span><span class="spaces">        </span><span class="nottickedoff">foldNode :: forall kind'. AST typeRef ctorRef varRef (Const a) kind' -&gt; Const a kind'</span>
+<span class="lineno">   67 </span><span class="spaces">        </span><span class="nottickedoff">foldNode = \case</span>
+<span class="lineno">   68 </span><span class="spaces">            </span><span class="nottickedoff">TopLevel tls -&gt; Const $ foldMap (foldMap getConst) tls</span>
+<span class="lineno">   69 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">   70 </span><span class="spaces">            </span><span class="nottickedoff">-- Declarations</span>
+<span class="lineno">   71 </span><span class="spaces">            </span><span class="nottickedoff">Definition name args _ e -&gt; Const (getConst name &lt;&gt; foldMap (getConst . extract) args &lt;&gt; getConst e)</span>
+<span class="lineno">   72 </span><span class="spaces">            </span><span class="nottickedoff">TypeAnnotation _ t -&gt; Const (getConst $ extract t)</span>
+<span class="lineno">   73 </span><span class="spaces">            </span><span class="nottickedoff">CommonDeclaration d -&gt; Const $ getConst d</span>
+<span class="lineno">   74 </span><span class="spaces">            </span><span class="nottickedoff">Datatype _ ctors -&gt; Const (foldMap (getConst . fold) ctors)</span>
+<span class="lineno">   75 </span><span class="spaces">            </span><span class="nottickedoff">TypeAlias _ _ t -&gt; Const (getConst $ extract t)</span>
+<span class="lineno">   76 </span><span class="spaces">            </span><span class="nottickedoff">PortAnnotation _ _ t -&gt; Const (getConst t)</span>
+<span class="lineno">   77 </span><span class="spaces">            </span><span class="nottickedoff">PortDefinition_until_0_16 _ _ e -&gt; Const (getConst e)</span>
+<span class="lineno">   78 </span><span class="spaces">            </span><span class="nottickedoff">Fixity_until_0_18 _ _ _ _ name -&gt; Const (fvar name)</span>
+<span class="lineno">   79 </span><span class="spaces">            </span><span class="nottickedoff">Fixity _ _ _ _ -&gt; mempty</span>
+<span class="lineno">   80 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">   81 </span><span class="spaces">            </span><span class="nottickedoff">-- Expressions</span>
+<span class="lineno">   82 </span><span class="spaces">            </span><span class="nottickedoff">Unit _ -&gt; mempty</span>
+<span class="lineno">   83 </span><span class="spaces">            </span><span class="nottickedoff">Literal _ -&gt; mempty</span>
+<span class="lineno">   84 </span><span class="spaces">            </span><span class="nottickedoff">VarExpr var -&gt; Const $ fvar var</span>
+<span class="lineno">   85 </span><span class="spaces">            </span><span class="nottickedoff">App first rest _ -&gt; first &lt;&gt; mconcat (fmap extract rest)</span>
+<span class="lineno">   86 </span><span class="spaces">            </span><span class="nottickedoff">Unary _ e -&gt; e</span>
+<span class="lineno">   87 </span><span class="spaces">            </span><span class="nottickedoff">Binops first ops _ -&gt; Const (getConst first &lt;&gt; foldMap foldBinopsClause ops)</span>
+<span class="lineno">   88 </span><span class="spaces">            </span><span class="nottickedoff">Parens e -&gt; extract e</span>
+<span class="lineno">   89 </span><span class="spaces">            </span><span class="nottickedoff">ExplicitList terms _ _ -&gt; fold terms</span>
+<span class="lineno">   90 </span><span class="spaces">            </span><span class="nottickedoff">Range left right _ -&gt; extract left &lt;&gt; extract right</span>
+<span class="lineno">   91 </span><span class="spaces">            </span><span class="nottickedoff">Tuple terms _ -&gt; mconcat $ fmap extract terms</span>
+<span class="lineno">   92 </span><span class="spaces">            </span><span class="nottickedoff">TupleFunction _ -&gt; mempty</span>
+<span class="lineno">   93 </span><span class="spaces">            </span><span class="nottickedoff">Record _ fields _ _ -&gt; foldMap (extract . _value) fields</span>
+<span class="lineno">   94 </span><span class="spaces">            </span><span class="nottickedoff">Access e _ -&gt; e</span>
+<span class="lineno">   95 </span><span class="spaces">            </span><span class="nottickedoff">AccessFunction _ -&gt; mempty</span>
+<span class="lineno">   96 </span><span class="spaces">            </span><span class="nottickedoff">Lambda args _ e _ -&gt; Const (foldMap (getConst . extract) args &lt;&gt; getConst e)</span>
+<span class="lineno">   97 </span><span class="spaces">            </span><span class="nottickedoff">If cond elsifs els -&gt; Const (foldIfClause cond &lt;&gt; foldMap (foldIfClause . extract) elsifs &lt;&gt; getConst (extract els))</span>
+<span class="lineno">   98 </span><span class="spaces">            </span><span class="nottickedoff">Let defs _ e -&gt; Const (foldMap getConst defs &lt;&gt; getConst e)</span>
+<span class="lineno">   99 </span><span class="spaces">            </span><span class="nottickedoff">LetCommonDeclaration d -&gt; Const $ getConst d</span>
+<span class="lineno">  100 </span><span class="spaces">            </span><span class="nottickedoff">LetComment _ -&gt; mempty</span>
+<span class="lineno">  101 </span><span class="spaces">            </span><span class="nottickedoff">Case (cond, _) branches -&gt; Const (getConst (extract cond) &lt;&gt; foldMap getConst branches)</span>
+<span class="lineno">  102 </span><span class="spaces">            </span><span class="nottickedoff">CaseBranch _ _ _ p e -&gt; Const (getConst p &lt;&gt; getConst e)</span>
+<span class="lineno">  103 </span><span class="spaces">            </span><span class="nottickedoff">GLShader _ -&gt; mempty</span>
+<span class="lineno">  104 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  105 </span><span class="spaces">            </span><span class="nottickedoff">-- Patterns</span>
+<span class="lineno">  106 </span><span class="spaces">            </span><span class="nottickedoff">Anything -&gt; mempty</span>
+<span class="lineno">  107 </span><span class="spaces">            </span><span class="nottickedoff">UnitPattern _ -&gt; mempty</span>
+<span class="lineno">  108 </span><span class="spaces">            </span><span class="nottickedoff">LiteralPattern _ -&gt; mempty</span>
+<span class="lineno">  109 </span><span class="spaces">            </span><span class="nottickedoff">VarPattern _ -&gt; mempty</span>
+<span class="lineno">  110 </span><span class="spaces">            </span><span class="nottickedoff">OpPattern _ -&gt; mempty</span>
+<span class="lineno">  111 </span><span class="spaces">            </span><span class="nottickedoff">DataPattern ctor args -&gt; Const (fctor ctor &lt;&gt; foldMap (getConst . extract) args)</span>
+<span class="lineno">  112 </span><span class="spaces">            </span><span class="nottickedoff">PatternParens p -&gt; extract p</span>
+<span class="lineno">  113 </span><span class="spaces">            </span><span class="nottickedoff">TuplePattern terms -&gt; foldMap extract terms</span>
+<span class="lineno">  114 </span><span class="spaces">            </span><span class="nottickedoff">EmptyListPattern _ -&gt; mempty</span>
+<span class="lineno">  115 </span><span class="spaces">            </span><span class="nottickedoff">ListPattern terms -&gt; foldMap extract terms</span>
+<span class="lineno">  116 </span><span class="spaces">            </span><span class="nottickedoff">ConsPattern first rest -&gt; extract first &lt;&gt; fold rest</span>
+<span class="lineno">  117 </span><span class="spaces">            </span><span class="nottickedoff">EmptyRecordPattern _ -&gt; mempty</span>
+<span class="lineno">  118 </span><span class="spaces">            </span><span class="nottickedoff">RecordPattern _ -&gt; mempty</span>
+<span class="lineno">  119 </span><span class="spaces">            </span><span class="nottickedoff">Alias p _ -&gt; extract p</span>
+<span class="lineno">  120 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  121 </span><span class="spaces">            </span><span class="nottickedoff">-- Types</span>
+<span class="lineno">  122 </span><span class="spaces">            </span><span class="nottickedoff">UnitType _ -&gt; mempty</span>
+<span class="lineno">  123 </span><span class="spaces">            </span><span class="nottickedoff">TypeVariable _ -&gt; mempty</span>
+<span class="lineno">  124 </span><span class="spaces">            </span><span class="nottickedoff">TypeConstruction name args _ -&gt; Const (foldTypeConstructor name &lt;&gt; foldMap (getConst . extract) args)</span>
+<span class="lineno">  125 </span><span class="spaces">            </span><span class="nottickedoff">TypeParens typ -&gt; extract typ</span>
+<span class="lineno">  126 </span><span class="spaces">            </span><span class="nottickedoff">TupleType terms _ -&gt; foldMap extract terms</span>
+<span class="lineno">  127 </span><span class="spaces">            </span><span class="nottickedoff">RecordType _ fields _ _ -&gt; foldMap (extract . _value) fields</span>
+<span class="lineno">  128 </span><span class="spaces">            </span><span class="nottickedoff">FunctionType first rest _ -&gt; extract first &lt;&gt; fold rest</span>
+<span class="lineno">  129 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  130 </span><span class="spaces">        </span><span class="nottickedoff">foldTypeConstructor :: TypeConstructor typeRef -&gt; a</span>
+<span class="lineno">  131 </span><span class="spaces">        </span><span class="nottickedoff">foldTypeConstructor = \case</span>
+<span class="lineno">  132 </span><span class="spaces">            </span><span class="nottickedoff">NamedConstructor name -&gt; ftype name</span>
+<span class="lineno">  133 </span><span class="spaces">            </span><span class="nottickedoff">TupleConstructor _ -&gt; mempty</span>
+<span class="lineno">  134 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  135 </span><span class="spaces">        </span><span class="nottickedoff">foldBinopsClause :: BinopsClause varRef (Const a 'ExpressionNK) -&gt; a</span>
+<span class="lineno">  136 </span><span class="spaces">        </span><span class="nottickedoff">foldBinopsClause = \case</span>
+<span class="lineno">  137 </span><span class="spaces">            </span><span class="nottickedoff">BinopsClause _ op _ e -&gt; fvar op &lt;&gt; getConst e</span>
+<span class="lineno">  138 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  139 </span><span class="spaces">        </span><span class="nottickedoff">foldIfClause :: IfClause (Const a 'ExpressionNK) -&gt; a</span>
+<span class="lineno">  140 </span><span class="spaces">        </span><span class="nottickedoff">foldIfClause = \case</span>
+<span class="lineno">  141 </span><span class="spaces">            </span><span class="nottickedoff">IfClause cond els -&gt; getConst (extract cond) &lt;&gt; getConst (extract els)</span></span>
+<span class="lineno">  142 </span>
+<span class="lineno">  143 </span>
+<span class="lineno">  144 </span>mapNs ::
+<span class="lineno">  145 </span>    Functor annf =&gt;
+<span class="lineno">  146 </span>    (ns1 -&gt; ns2)
+<span class="lineno">  147 </span>    -&gt; (forall kind.
+<span class="lineno">  148 </span>        ASTNS annf ns1 kind
+<span class="lineno">  149 </span>        -&gt; ASTNS annf ns2 kind
+<span class="lineno">  150 </span>       )
+<span class="lineno">  151 </span><span class="decl"><span class="istickedoff">mapNs f =</span>
+<span class="lineno">  152 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  153 </span><span class="spaces">        </span><span class="istickedoff">mapTypeRef (ns, u) = (f ns, u)</span>
+<span class="lineno">  154 </span><span class="spaces">        </span><span class="istickedoff">mapCtorRef (ns, u) = (f ns, u)</span>
+<span class="lineno">  155 </span><span class="spaces">        </span><span class="istickedoff">mapVarRef (VarRef ns l) = VarRef (f ns) l</span>
+<span class="lineno">  156 </span><span class="spaces">        </span><span class="istickedoff">mapVarRef (TagRef ns u) = TagRef (f ns) u</span>
+<span class="lineno">  157 </span><span class="spaces">        </span><span class="istickedoff">mapVarRef (OpRef op) = OpRef op</span>
+<span class="lineno">  158 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  159 </span><span class="spaces">    </span><span class="istickedoff">bottomUpReferences mapTypeRef mapCtorRef mapVarRef</span></span>
+
+</pre>
+</body>
+</html>

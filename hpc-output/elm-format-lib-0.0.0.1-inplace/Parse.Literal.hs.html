@@ -1,0 +1,290 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module Parse.Literal (literal) where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import Prelude hiding (exponent)
+<span class="lineno">    4 </span>import Data.Char (digitToInt, isSpace)
+<span class="lineno">    5 </span>import Text.Parsec ((&lt;|&gt;), (&lt;?&gt;), digit, hexDigit, lookAhead, many1, option, string, try, char, notFollowedBy, choice, anyChar, satisfy, manyTill, many, between, skipMany, skipMany1)
+<span class="lineno">    6 </span>import Text.Parsec.Char (octDigit, space, upper)
+<span class="lineno">    7 </span>import Parse.Helpers (processAs, escaped, expecting, sandwich, betwixt)
+<span class="lineno">    8 </span>import Parse.IParser
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>import AST.V0_16
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>literal :: IParser LiteralValue
+<span class="lineno">   14 </span><span class="decl"><span class="istickedoff">literal =</span>
+<span class="lineno">   15 </span><span class="spaces">  </span><span class="istickedoff">num &lt;|&gt; (uncurry Str &lt;$&gt; str) &lt;|&gt; (Chr &lt;$&gt; chr)</span></span>
+<span class="lineno">   16 </span>
+<span class="lineno">   17 </span>
+<span class="lineno">   18 </span>num :: IParser LiteralValue
+<span class="lineno">   19 </span><span class="decl"><span class="istickedoff">num =</span>
+<span class="lineno">   20 </span><span class="spaces">  </span><span class="istickedoff">toLiteral &lt;$&gt; (rawNumber &lt;?&gt; <span class="nottickedoff">&quot;a number&quot;</span>)</span></span>
+<span class="lineno">   21 </span>
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>toLiteral :: String -&gt; LiteralValue
+<span class="lineno">   24 </span><span class="decl"><span class="istickedoff">toLiteral n</span>
+<span class="lineno">   25 </span><span class="spaces">  </span><span class="istickedoff">| 'x' `elem` n         = IntNum (read n) HexadecimalInt</span>
+<span class="lineno">   26 </span><span class="spaces">  </span><span class="istickedoff">| <span class="tickonlyfalse">any (`elem` (&quot;eE&quot; :: String)) n</span> = <span class="nottickedoff">FloatNum (read n) ExponentFloat</span></span>
+<span class="lineno">   27 </span><span class="spaces">  </span><span class="istickedoff">| any (`elem` (&quot;.&quot; :: String)) n = FloatNum (read n) DecimalFloat</span>
+<span class="lineno">   28 </span><span class="spaces">  </span><span class="istickedoff">| <span class="tickonlytrue">otherwise</span>            = IntNum (read n) DecimalInt</span></span>
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>
+<span class="lineno">   31 </span>rawNumber :: IParser String
+<span class="lineno">   32 </span><span class="decl"><span class="istickedoff">rawNumber =</span>
+<span class="lineno">   33 </span><span class="spaces">  </span><span class="istickedoff">concat &lt;$&gt; sequence</span>
+<span class="lineno">   34 </span><span class="spaces">    </span><span class="istickedoff">[ option &quot;&quot; minus</span>
+<span class="lineno">   35 </span><span class="spaces">    </span><span class="istickedoff">, base16 &lt;|&gt; base10</span>
+<span class="lineno">   36 </span><span class="spaces">    </span><span class="istickedoff">]</span></span>
+<span class="lineno">   37 </span>
+<span class="lineno">   38 </span>
+<span class="lineno">   39 </span>base16 :: IParser String
+<span class="lineno">   40 </span><span class="decl"><span class="istickedoff">base16 =</span>
+<span class="lineno">   41 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- try (string &quot;0x&quot;)</span>
+<span class="lineno">   42 </span><span class="spaces">      </span><span class="istickedoff">digits &lt;- many1 hexDigit</span>
+<span class="lineno">   43 </span><span class="spaces">      </span><span class="istickedoff">return (&quot;0x&quot; ++ digits)</span></span>
+<span class="lineno">   44 </span>
+<span class="lineno">   45 </span>
+<span class="lineno">   46 </span>base10 :: IParser String
+<span class="lineno">   47 </span><span class="decl"><span class="istickedoff">base10 =</span>
+<span class="lineno">   48 </span><span class="spaces">  </span><span class="istickedoff">concat &lt;$&gt; sequence</span>
+<span class="lineno">   49 </span><span class="spaces">    </span><span class="istickedoff">[ many1 digit</span>
+<span class="lineno">   50 </span><span class="spaces">    </span><span class="istickedoff">, option &quot;&quot; decimals</span>
+<span class="lineno">   51 </span><span class="spaces">    </span><span class="istickedoff">, option &quot;&quot; exponent</span>
+<span class="lineno">   52 </span><span class="spaces">    </span><span class="istickedoff">]</span></span>
+<span class="lineno">   53 </span>
+<span class="lineno">   54 </span>
+<span class="lineno">   55 </span>minus :: IParser String
+<span class="lineno">   56 </span><span class="decl"><span class="istickedoff">minus =</span>
+<span class="lineno">   57 </span><span class="spaces">  </span><span class="istickedoff">try $ do</span>
+<span class="lineno">   58 </span><span class="spaces">    </span><span class="istickedoff">_ &lt;- string &quot;-&quot;</span>
+<span class="lineno">   59 </span><span class="spaces">    </span><span class="istickedoff">_ &lt;- lookAhead digit</span>
+<span class="lineno">   60 </span><span class="spaces">    </span><span class="istickedoff">return &quot;-&quot;</span></span>
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>
+<span class="lineno">   63 </span>decimals :: IParser String
+<span class="lineno">   64 </span><span class="decl"><span class="istickedoff">decimals =</span>
+<span class="lineno">   65 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- try $ lookAhead (string &quot;.&quot; &gt;&gt; digit)</span>
+<span class="lineno">   66 </span><span class="spaces">      </span><span class="istickedoff">_ &lt;- string &quot;.&quot;</span>
+<span class="lineno">   67 </span><span class="spaces">      </span><span class="istickedoff">n &lt;- many1 digit</span>
+<span class="lineno">   68 </span><span class="spaces">      </span><span class="istickedoff">return ('.' : n)</span></span>
+<span class="lineno">   69 </span>
+<span class="lineno">   70 </span>
+<span class="lineno">   71 </span>exponent :: IParser String
+<span class="lineno">   72 </span><span class="decl"><span class="istickedoff">exponent =</span>
+<span class="lineno">   73 </span><span class="spaces">  </span><span class="istickedoff">do  _ &lt;- string &quot;e&quot; &lt;|&gt; string &quot;E&quot;</span>
+<span class="lineno">   74 </span><span class="spaces">      </span><span class="istickedoff">op &lt;- option <span class="nottickedoff">&quot;&quot;</span> (string &quot;+&quot; &lt;|&gt; string &quot;-&quot;)</span>
+<span class="lineno">   75 </span><span class="spaces">      </span><span class="istickedoff">n &lt;- many1 digit</span>
+<span class="lineno">   76 </span><span class="spaces">      </span><span class="istickedoff">return <span class="nottickedoff">('e' : op ++ n)</span></span></span>
+<span class="lineno">   77 </span>
+<span class="lineno">   78 </span>
+<span class="lineno">   79 </span>str :: IParser (String, StringRepresentation)
+<span class="lineno">   80 </span><span class="decl"><span class="istickedoff">str =</span>
+<span class="lineno">   81 </span><span class="spaces">  </span><span class="istickedoff">expecting <span class="nottickedoff">&quot;a string&quot;</span> $</span>
+<span class="lineno">   82 </span><span class="spaces">  </span><span class="istickedoff">do  (s, representation) &lt;- choice [ multiStr, singleStr ]</span>
+<span class="lineno">   83 </span><span class="spaces">      </span><span class="istickedoff">result &lt;- processAs stringLiteral . sandwich '\&quot;' $ concat s</span>
+<span class="lineno">   84 </span><span class="spaces">      </span><span class="istickedoff">return (result, representation)</span>
+<span class="lineno">   85 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">   86 </span><span class="spaces">    </span><span class="istickedoff">rawString quote insides =</span>
+<span class="lineno">   87 </span><span class="spaces">        </span><span class="istickedoff">quote &gt;&gt; manyTill insides quote</span>
+<span class="lineno">   88 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   89 </span><span class="spaces">    </span><span class="istickedoff">multiStr  =</span>
+<span class="lineno">   90 </span><span class="spaces">        </span><span class="istickedoff">do  result &lt;- rawString (try (string &quot;\&quot;\&quot;\&quot;&quot;)) multilineStringChar</span>
+<span class="lineno">   91 </span><span class="spaces">            </span><span class="istickedoff">return (result, TripleQuotedString)</span>
+<span class="lineno">   92 </span><span class="spaces">    </span><span class="istickedoff">singleStr =</span>
+<span class="lineno">   93 </span><span class="spaces">        </span><span class="istickedoff">do  result &lt;- rawString (char '&quot;') stringChar</span>
+<span class="lineno">   94 </span><span class="spaces">            </span><span class="istickedoff">return (result, SingleQuotedString)</span>
+<span class="lineno">   95 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   96 </span><span class="spaces">    </span><span class="istickedoff">stringChar :: IParser String</span>
+<span class="lineno">   97 </span><span class="spaces">    </span><span class="istickedoff">stringChar = choice [ newlineChar, escaped '\&quot;', (:[]) &lt;$&gt; satisfy (/= '\&quot;') ]</span>
+<span class="lineno">   98 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   99 </span><span class="spaces">    </span><span class="istickedoff">multilineStringChar :: IParser String</span>
+<span class="lineno">  100 </span><span class="spaces">    </span><span class="istickedoff">multilineStringChar =</span>
+<span class="lineno">  101 </span><span class="spaces">        </span><span class="istickedoff">do noEnd</span>
+<span class="lineno">  102 </span><span class="spaces">           </span><span class="istickedoff">choice [ newlineChar, escaped '\&quot;', expandQuote &lt;$&gt; anyChar ]</span>
+<span class="lineno">  103 </span><span class="spaces">        </span><span class="istickedoff">where</span>
+<span class="lineno">  104 </span><span class="spaces">          </span><span class="istickedoff">noEnd = notFollowedBy (string &quot;\&quot;\&quot;\&quot;&quot;)</span>
+<span class="lineno">  105 </span><span class="spaces">          </span><span class="istickedoff">expandQuote c = if c == '\&quot;' then &quot;\\\&quot;&quot; else [c]</span>
+<span class="lineno">  106 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  107 </span><span class="spaces">    </span><span class="istickedoff">newlineChar :: IParser String</span>
+<span class="lineno">  108 </span><span class="spaces">    </span><span class="istickedoff">newlineChar =</span>
+<span class="lineno">  109 </span><span class="spaces">        </span><span class="istickedoff">choice</span>
+<span class="lineno">  110 </span><span class="spaces">            </span><span class="istickedoff">[ char '\n' &gt;&gt; return &quot;\\n&quot;</span>
+<span class="lineno">  111 </span><span class="spaces">            </span><span class="istickedoff">, char '\r' &gt;&gt; choice</span>
+<span class="lineno">  112 </span><span class="spaces">                </span><span class="istickedoff">[ char '\n' &gt;&gt; return &quot;\\n&quot;</span>
+<span class="lineno">  113 </span><span class="spaces">                </span><span class="istickedoff">, return &quot;\\r&quot;</span>
+<span class="lineno">  114 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  115 </span><span class="spaces">            </span><span class="istickedoff">]</span></span>
+<span class="lineno">  116 </span>
+<span class="lineno">  117 </span>
+<span class="lineno">  118 </span>chr :: IParser Char
+<span class="lineno">  119 </span><span class="decl"><span class="istickedoff">chr =</span>
+<span class="lineno">  120 </span><span class="spaces">    </span><span class="istickedoff">betwixt '\'' '\'' character &lt;?&gt; <span class="nottickedoff">&quot;a character&quot;</span></span>
+<span class="lineno">  121 </span><span class="spaces">  </span><span class="istickedoff">where</span>
+<span class="lineno">  122 </span><span class="spaces">    </span><span class="istickedoff">nonQuote = satisfy (/='\'')</span>
+<span class="lineno">  123 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  124 </span><span class="spaces">    </span><span class="istickedoff">character =</span>
+<span class="lineno">  125 </span><span class="spaces">      </span><span class="istickedoff">do  c &lt;- choice</span>
+<span class="lineno">  126 </span><span class="spaces">                </span><span class="istickedoff">[ escaped '\''</span>
+<span class="lineno">  127 </span><span class="spaces">                </span><span class="istickedoff">, (:) &lt;$&gt; char '\\' &lt;*&gt; many1 nonQuote</span>
+<span class="lineno">  128 </span><span class="spaces">                </span><span class="istickedoff">, (:[]) &lt;$&gt; nonQuote</span>
+<span class="lineno">  129 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  130 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  131 </span><span class="spaces">          </span><span class="istickedoff">processAs charLiteral $ sandwich '\'' c</span></span>
+<span class="lineno">  132 </span>
+<span class="lineno">  133 </span>
+<span class="lineno">  134 </span>--
+<span class="lineno">  135 </span>-- Stuff forked from Text.Parsec.Token
+<span class="lineno">  136 </span>--
+<span class="lineno">  137 </span>
+<span class="lineno">  138 </span>charLiteral :: IParser Char
+<span class="lineno">  139 </span><span class="decl"><span class="istickedoff">charLiteral     = lexeme (between (char '\'')</span>
+<span class="lineno">  140 </span><span class="spaces">                                  </span><span class="istickedoff">(char '\'' &lt;?&gt; <span class="nottickedoff">&quot;end of character&quot;</span>)</span>
+<span class="lineno">  141 </span><span class="spaces">                                  </span><span class="istickedoff">characterChar )</span>
+<span class="lineno">  142 </span><span class="spaces">                </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;character&quot;</span></span></span>
+<span class="lineno">  143 </span>
+<span class="lineno">  144 </span>characterChar :: IParser Char
+<span class="lineno">  145 </span><span class="decl"><span class="istickedoff">characterChar   = charLetter &lt;|&gt; charEscape</span>
+<span class="lineno">  146 </span><span class="spaces">                </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;literal character&quot;</span></span></span>
+<span class="lineno">  147 </span>
+<span class="lineno">  148 </span>charEscape :: IParser Char
+<span class="lineno">  149 </span><span class="decl"><span class="istickedoff">charEscape      = do{ _ &lt;- char '\\'; escapeCode }</span></span>
+<span class="lineno">  150 </span>charLetter :: IParser Char
+<span class="lineno">  151 </span><span class="decl"><span class="istickedoff">charLetter      = satisfy (\c -&gt; (c /= '\'') &amp;&amp; (c /= '\\') &amp;&amp; (c &gt; '\026') || (c == '\t'))</span></span>
+<span class="lineno">  152 </span>
+<span class="lineno">  153 </span>
+<span class="lineno">  154 </span>stringLiteral :: IParser String
+<span class="lineno">  155 </span><span class="decl"><span class="istickedoff">stringLiteral   = lexeme (</span>
+<span class="lineno">  156 </span><span class="spaces">                  </span><span class="istickedoff">do{ str &lt;- between (char '&quot;')</span>
+<span class="lineno">  157 </span><span class="spaces">                                      </span><span class="istickedoff">(char '&quot;' &lt;?&gt; <span class="nottickedoff">&quot;end of string&quot;</span>)</span>
+<span class="lineno">  158 </span><span class="spaces">                                      </span><span class="istickedoff">(many stringChar)</span>
+<span class="lineno">  159 </span><span class="spaces">                    </span><span class="istickedoff">; return (foldr (maybe <span class="nottickedoff">id</span> (:)) &quot;&quot; str)</span>
+<span class="lineno">  160 </span><span class="spaces">                    </span><span class="istickedoff">}</span>
+<span class="lineno">  161 </span><span class="spaces">                  </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;literal string&quot;</span>)</span></span>
+<span class="lineno">  162 </span>
+<span class="lineno">  163 </span>stringChar :: IParser (Maybe Char)
+<span class="lineno">  164 </span><span class="decl"><span class="istickedoff">stringChar      =   do{ c &lt;- stringLetter; return (Just c) }</span>
+<span class="lineno">  165 </span><span class="spaces">                </span><span class="istickedoff">&lt;|&gt; stringEscape</span>
+<span class="lineno">  166 </span><span class="spaces">                </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;string character&quot;</span></span></span>
+<span class="lineno">  167 </span>
+<span class="lineno">  168 </span>stringLetter :: IParser Char
+<span class="lineno">  169 </span><span class="decl"><span class="istickedoff">stringLetter    = satisfy (\c -&gt; (c /= '&quot;') &amp;&amp; (c /= '\\') &amp;&amp; (c &gt; '\026') || (c == '\t'))</span></span>
+<span class="lineno">  170 </span>
+<span class="lineno">  171 </span>stringEscape :: IParser (Maybe Char)
+<span class="lineno">  172 </span><span class="decl"><span class="istickedoff">stringEscape    = do{ _ &lt;- char '\\'</span>
+<span class="lineno">  173 </span><span class="spaces">                    </span><span class="istickedoff">;     do{ _ &lt;- escapeGap  ; <span class="nottickedoff">return Nothing</span> }</span>
+<span class="lineno">  174 </span><span class="spaces">                      </span><span class="istickedoff">&lt;|&gt; do{ _ &lt;- escapeEmpty; <span class="nottickedoff">return Nothing</span> }</span>
+<span class="lineno">  175 </span><span class="spaces">                      </span><span class="istickedoff">&lt;|&gt; do{ esc &lt;- escapeCode; return (Just esc) }</span>
+<span class="lineno">  176 </span><span class="spaces">                    </span><span class="istickedoff">}</span></span>
+<span class="lineno">  177 </span>
+<span class="lineno">  178 </span>escapeEmpty :: IParser Char
+<span class="lineno">  179 </span><span class="decl"><span class="istickedoff">escapeEmpty     = char '&amp;'</span></span>
+<span class="lineno">  180 </span>escapeGap :: IParser Char
+<span class="lineno">  181 </span><span class="decl"><span class="istickedoff">escapeGap       = do{ _ &lt;- many1 space</span>
+<span class="lineno">  182 </span><span class="spaces">                    </span><span class="istickedoff">; <span class="nottickedoff">char '\\' &lt;?&gt; &quot;end of string gap&quot;</span></span>
+<span class="lineno">  183 </span><span class="spaces">                    </span><span class="istickedoff">}</span></span>
+<span class="lineno">  184 </span>
+<span class="lineno">  185 </span>
+<span class="lineno">  186 </span>
+<span class="lineno">  187 </span>-- escape codes
+<span class="lineno">  188 </span>escapeCode :: IParser Char
+<span class="lineno">  189 </span><span class="decl"><span class="istickedoff">escapeCode      = charEsc &lt;|&gt; charNum &lt;|&gt; <span class="nottickedoff">charAscii &lt;|&gt; charControl</span></span>
+<span class="lineno">  190 </span><span class="spaces">                </span><span class="istickedoff">&lt;?&gt; <span class="nottickedoff">&quot;escape code&quot;</span></span></span>
+<span class="lineno">  191 </span>
+<span class="lineno">  192 </span>charControl :: IParser Char
+<span class="lineno">  193 </span><span class="decl"><span class="nottickedoff">charControl     = do{ _ &lt;- char '^'</span>
+<span class="lineno">  194 </span><span class="spaces">                    </span><span class="nottickedoff">; code &lt;- upper</span>
+<span class="lineno">  195 </span><span class="spaces">                    </span><span class="nottickedoff">; return (toEnum (fromEnum code - fromEnum 'A' + 1))</span>
+<span class="lineno">  196 </span><span class="spaces">                    </span><span class="nottickedoff">}</span></span>
+<span class="lineno">  197 </span>
+<span class="lineno">  198 </span>charNum :: IParser Char
+<span class="lineno">  199 </span><span class="decl"><span class="istickedoff">charNum         = do{ code &lt;- decimal</span>
+<span class="lineno">  200 </span><span class="spaces">                              </span><span class="istickedoff">&lt;|&gt; do{ _ &lt;- char 'o'; <span class="nottickedoff">number 8 octDigit</span> }</span>
+<span class="lineno">  201 </span><span class="spaces">                              </span><span class="istickedoff">&lt;|&gt; do{ _ &lt;- char 'x'; number 16 hexDigit }</span>
+<span class="lineno">  202 </span><span class="spaces">                              </span><span class="istickedoff">&lt;|&gt; do{ _ &lt;- char 'u'; between (char '{') (char '}') (number 16 hexDigit) }</span>
+<span class="lineno">  203 </span><span class="spaces">                    </span><span class="istickedoff">; if <span class="tickonlyfalse">code &gt; 0x10FFFF</span></span>
+<span class="lineno">  204 </span><span class="spaces">                      </span><span class="istickedoff">then <span class="nottickedoff">fail &quot;invalid escape sequence&quot;</span></span>
+<span class="lineno">  205 </span><span class="spaces">                      </span><span class="istickedoff">else return (toEnum (fromInteger code))</span>
+<span class="lineno">  206 </span><span class="spaces">                    </span><span class="istickedoff">}</span></span>
+<span class="lineno">  207 </span>
+<span class="lineno">  208 </span>charEsc :: IParser Char
+<span class="lineno">  209 </span><span class="decl"><span class="istickedoff">charEsc         = choice (map parseEsc escMap)</span>
+<span class="lineno">  210 </span><span class="spaces">                </span><span class="istickedoff">where</span>
+<span class="lineno">  211 </span><span class="spaces">                  </span><span class="istickedoff">parseEsc :: (Char, a) -&gt; IParser a</span>
+<span class="lineno">  212 </span><span class="spaces">                  </span><span class="istickedoff">parseEsc (c,code)     = do{ _ &lt;- char c; return code }</span></span>
+<span class="lineno">  213 </span>
+<span class="lineno">  214 </span>charAscii :: IParser Char
+<span class="lineno">  215 </span><span class="decl"><span class="nottickedoff">charAscii       = choice (map parseAscii asciiMap)</span>
+<span class="lineno">  216 </span><span class="spaces">                </span><span class="nottickedoff">where</span>
+<span class="lineno">  217 </span><span class="spaces">                  </span><span class="nottickedoff">parseAscii :: (String, a) -&gt; IParser a</span>
+<span class="lineno">  218 </span><span class="spaces">                  </span><span class="nottickedoff">parseAscii (asc,code) = try (do{ _ &lt;- string asc; return code })</span></span>
+<span class="lineno">  219 </span>
+<span class="lineno">  220 </span>
+<span class="lineno">  221 </span>-- escape code tables
+<span class="lineno">  222 </span>escMap :: [(Char, Char)]
+<span class="lineno">  223 </span><span class="decl"><span class="istickedoff">escMap          = zip (&quot;abfnrtv\\\&quot;\'&quot;) (&quot;\a\b\f\n\r\t\v\\\&quot;\'&quot;)</span></span>
+<span class="lineno">  224 </span>asciiMap :: [(String, Char)]
+<span class="lineno">  225 </span><span class="decl"><span class="nottickedoff">asciiMap        = zip (ascii3codes ++ ascii2codes) (ascii3 ++ ascii2)</span></span>
+<span class="lineno">  226 </span>
+<span class="lineno">  227 </span>ascii2codes :: [String]
+<span class="lineno">  228 </span><span class="decl"><span class="nottickedoff">ascii2codes     = [&quot;BS&quot;,&quot;HT&quot;,&quot;LF&quot;,&quot;VT&quot;,&quot;FF&quot;,&quot;CR&quot;,&quot;SO&quot;,&quot;SI&quot;,&quot;EM&quot;,</span>
+<span class="lineno">  229 </span><span class="spaces">                    </span><span class="nottickedoff">&quot;FS&quot;,&quot;GS&quot;,&quot;RS&quot;,&quot;US&quot;,&quot;SP&quot;]</span></span>
+<span class="lineno">  230 </span>ascii3codes :: [String]
+<span class="lineno">  231 </span><span class="decl"><span class="nottickedoff">ascii3codes     = [&quot;NUL&quot;,&quot;SOH&quot;,&quot;STX&quot;,&quot;ETX&quot;,&quot;EOT&quot;,&quot;ENQ&quot;,&quot;ACK&quot;,&quot;BEL&quot;,</span>
+<span class="lineno">  232 </span><span class="spaces">                    </span><span class="nottickedoff">&quot;DLE&quot;,&quot;DC1&quot;,&quot;DC2&quot;,&quot;DC3&quot;,&quot;DC4&quot;,&quot;NAK&quot;,&quot;SYN&quot;,&quot;ETB&quot;,</span>
+<span class="lineno">  233 </span><span class="spaces">                    </span><span class="nottickedoff">&quot;CAN&quot;,&quot;SUB&quot;,&quot;ESC&quot;,&quot;DEL&quot;]</span></span>
+<span class="lineno">  234 </span>
+<span class="lineno">  235 </span>ascii2 :: [Char]
+<span class="lineno">  236 </span><span class="decl"><span class="nottickedoff">ascii2          = ['\BS','\HT','\LF','\VT','\FF','\CR','\SO','\SI',</span>
+<span class="lineno">  237 </span><span class="spaces">                    </span><span class="nottickedoff">'\EM','\FS','\GS','\RS','\US','\SP']</span></span>
+<span class="lineno">  238 </span>ascii3 :: [Char]
+<span class="lineno">  239 </span><span class="decl"><span class="nottickedoff">ascii3          = ['\NUL','\SOH','\STX','\ETX','\EOT','\ENQ','\ACK',</span>
+<span class="lineno">  240 </span><span class="spaces">                    </span><span class="nottickedoff">'\BEL','\DLE','\DC1','\DC2','\DC3','\DC4','\NAK',</span>
+<span class="lineno">  241 </span><span class="spaces">                    </span><span class="nottickedoff">'\SYN','\ETB','\CAN','\SUB','\ESC','\DEL']</span></span>
+<span class="lineno">  242 </span>
+<span class="lineno">  243 </span>
+<span class="lineno">  244 </span>decimal :: IParser Integer
+<span class="lineno">  245 </span><span class="decl"><span class="istickedoff">decimal         = number <span class="nottickedoff">10</span> digit</span></span>
+<span class="lineno">  246 </span>
+<span class="lineno">  247 </span>number :: Integer -&gt; IParser Char -&gt; IParser Integer
+<span class="lineno">  248 </span><span class="decl"><span class="istickedoff">number base baseDigit</span>
+<span class="lineno">  249 </span><span class="spaces">    </span><span class="istickedoff">= do{ digits &lt;- many1 baseDigit</span>
+<span class="lineno">  250 </span><span class="spaces">        </span><span class="istickedoff">; let n = foldl (\x d -&gt; base*x + toInteger (digitToInt d)) 0 digits</span>
+<span class="lineno">  251 </span><span class="spaces">        </span><span class="istickedoff">; seq n (return n)</span>
+<span class="lineno">  252 </span><span class="spaces">        </span><span class="istickedoff">}</span></span>
+<span class="lineno">  253 </span>
+<span class="lineno">  254 </span>
+<span class="lineno">  255 </span>
+<span class="lineno">  256 </span>lexeme :: IParser a -&gt; IParser a
+<span class="lineno">  257 </span><span class="decl"><span class="istickedoff">lexeme p</span>
+<span class="lineno">  258 </span><span class="spaces">    </span><span class="istickedoff">= do{ x &lt;- p; whiteSpace; return x  }</span></span>
+<span class="lineno">  259 </span>
+<span class="lineno">  260 </span>
+<span class="lineno">  261 </span>--whiteSpace
+<span class="lineno">  262 </span>whiteSpace :: IParser ()
+<span class="lineno">  263 </span><span class="decl"><span class="istickedoff">whiteSpace = skipMany (simpleSpace &lt;?&gt; <span class="nottickedoff">&quot;&quot;</span>)</span></span>
+<span class="lineno">  264 </span>
+<span class="lineno">  265 </span>simpleSpace :: IParser ()
+<span class="lineno">  266 </span><span class="decl"><span class="istickedoff">simpleSpace =</span>
+<span class="lineno">  267 </span><span class="spaces">    </span><span class="istickedoff">skipMany1 (satisfy <span class="nottickedoff">isSpace</span>)</span></span>
+
+</pre>
+</body>
+</html>

@@ -1,0 +1,795 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DeriveGeneric #-}
+<span class="lineno">    2 </span>{-# LANGUAGE TypeFamilies #-}
+<span class="lineno">    3 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    4 </span>{-# LANGUAGE TupleSections #-}
+<span class="lineno">    5 </span>{-# LANGUAGE DuplicateRecordFields #-}
+<span class="lineno">    6 </span>{-# OPTIONS_GHC -Wno-orphans #-}
+<span class="lineno">    7 </span>module ElmFormat.AST.PublicAST.Expression (Expression(..), Definition(..), DefinitionBuilder, TypedParameter(..), mkDefinitions, fromDefinition) where
+<span class="lineno">    8 </span>
+<span class="lineno">    9 </span>import ElmFormat.AST.PublicAST.Core
+<span class="lineno">   10 </span>import ElmFormat.AST.PublicAST.Reference
+<span class="lineno">   11 </span>import qualified AST.V0_16 as AST
+<span class="lineno">   12 </span>import qualified Data.Indexed as I
+<span class="lineno">   13 </span>import qualified Data.Map.Strict as Map
+<span class="lineno">   14 </span>import Data.Map.Strict (Map)
+<span class="lineno">   15 </span>import qualified ElmFormat.AST.PatternMatching as PatternMatching
+<span class="lineno">   16 </span>import qualified Data.Maybe as Maybe
+<span class="lineno">   17 </span>import ElmFormat.AST.PublicAST.Pattern
+<span class="lineno">   18 </span>import ElmFormat.AST.PublicAST.Type
+<span class="lineno">   19 </span>import ElmFormat.AST.PublicAST.Comment
+<span class="lineno">   20 </span>import Data.Maybe (mapMaybe, fromMaybe)
+<span class="lineno">   21 </span>import Data.Text (Text)
+<span class="lineno">   22 </span>import qualified Data.Either as Either
+<span class="lineno">   23 </span>import qualified Data.Text as Text
+<span class="lineno">   24 </span>import qualified ElmFormat.AST.BinaryOperatorPrecedence as BinaryOperatorPrecedence
+<span class="lineno">   25 </span>
+<span class="lineno">   26 </span>
+<span class="lineno">   27 </span>data BinaryOperation
+<span class="lineno">   28 </span>    = BinaryOperation
+<span class="lineno">   29 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">operator</span></span></span> :: Reference
+<span class="lineno">   30 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">term</span></span></span> :: LocatedIfRequested Expression
+<span class="lineno">   31 </span>        }
+<span class="lineno">   32 </span>
+<span class="lineno">   33 </span>instance ToJSON BinaryOperation where
+<span class="lineno">   34 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">   35 </span>    <span class="decl"><span class="nottickedoff">toEncoding = \case</span>
+<span class="lineno">   36 </span><span class="spaces">        </span><span class="nottickedoff">BinaryOperation operator term -&gt;</span>
+<span class="lineno">   37 </span><span class="spaces">            </span><span class="nottickedoff">pairs $ mconcat</span>
+<span class="lineno">   38 </span><span class="spaces">                </span><span class="nottickedoff">[ &quot;operator&quot; .= operator</span>
+<span class="lineno">   39 </span><span class="spaces">                </span><span class="nottickedoff">, &quot;term&quot; .= term</span>
+<span class="lineno">   40 </span><span class="spaces">                </span><span class="nottickedoff">]</span></span>
+<span class="lineno">   41 </span>
+<span class="lineno">   42 </span>
+<span class="lineno">   43 </span>data LetDeclaration
+<span class="lineno">   44 </span>    = LetDefinition Definition
+<span class="lineno">   45 </span>    | Comment_ld Comment
+<span class="lineno">   46 </span>
+<span class="lineno">   47 </span>mkLetDeclarations :: Config -&gt; List (ASTNS Located [UppercaseIdentifier] 'LetDeclarationNK) -&gt; List (MaybeF LocatedIfRequested LetDeclaration)
+<span class="lineno">   48 </span><span class="decl"><span class="istickedoff">mkLetDeclarations config decls =</span>
+<span class="lineno">   49 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   50 </span><span class="spaces">        </span><span class="istickedoff">toDefBuilder :: ASTNS1 Located [UppercaseIdentifier] 'LetDeclarationNK -&gt; DefinitionBuilder LetDeclaration</span>
+<span class="lineno">   51 </span><span class="spaces">        </span><span class="istickedoff">toDefBuilder = \case</span>
+<span class="lineno">   52 </span><span class="spaces">            </span><span class="istickedoff">AST.LetCommonDeclaration (I.Fix (A _ def)) -&gt;</span>
+<span class="lineno">   53 </span><span class="spaces">                </span><span class="istickedoff">Right def</span>
+<span class="lineno">   54 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   55 </span><span class="spaces">            </span><span class="istickedoff">AST.LetComment comment -&gt;</span>
+<span class="lineno">   56 </span><span class="spaces">                </span><span class="istickedoff">Left $ Comment_ld (mkComment comment)</span>
+<span class="lineno">   57 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">   58 </span><span class="spaces">    </span><span class="istickedoff">mkDefinitions config LetDefinition $ fmap (JustF . fmap toDefBuilder . fromLocated config . I.unFix) decls</span></span>
+<span class="lineno">   59 </span>
+<span class="lineno">   60 </span>fromLetDeclaration :: LetDeclaration -&gt; List (ASTNS Identity [UppercaseIdentifier] 'LetDeclarationNK)
+<span class="lineno">   61 </span><span class="decl"><span class="istickedoff">fromLetDeclaration = \case</span>
+<span class="lineno">   62 </span><span class="spaces">    </span><span class="istickedoff">LetDefinition def -&gt;</span>
+<span class="lineno">   63 </span><span class="spaces">        </span><span class="istickedoff">I.Fix . Identity . AST.LetCommonDeclaration &lt;$&gt; fromDefinition def</span>
+<span class="lineno">   64 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   65 </span><span class="spaces">    </span><span class="istickedoff">Comment_ld comment -&gt;</span>
+<span class="lineno">   66 </span><span class="spaces">        </span><span class="istickedoff">pure $ I.Fix $ Identity $ AST.LetComment (fromComment comment)</span></span>
+<span class="lineno">   67 </span>
+<span class="lineno">   68 </span>
+<span class="lineno">   69 </span>instance ToJSON LetDeclaration where
+<span class="lineno">   70 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">   71 </span>    <span class="decl"><span class="nottickedoff">toEncoding = pairs . toPairs</span></span>
+<span class="lineno">   72 </span>
+<span class="lineno">   73 </span>instance ToPairs LetDeclaration where
+<span class="lineno">   74 </span>    <span class="decl"><span class="istickedoff">toPairs = \case</span>
+<span class="lineno">   75 </span><span class="spaces">        </span><span class="istickedoff">LetDefinition def -&gt;</span>
+<span class="lineno">   76 </span><span class="spaces">            </span><span class="istickedoff">toPairs def</span>
+<span class="lineno">   77 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   78 </span><span class="spaces">        </span><span class="istickedoff">Comment_ld comment -&gt;</span>
+<span class="lineno">   79 </span><span class="spaces">            </span><span class="istickedoff">toPairs comment</span></span>
+<span class="lineno">   80 </span>
+<span class="lineno">   81 </span>instance FromJSON LetDeclaration where
+<span class="lineno">   82 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;LetDeclaration&quot;</span> $ \obj -&gt; do</span>
+<span class="lineno">   83 </span><span class="spaces">        </span><span class="istickedoff">tag :: Text &lt;- obj .: &quot;tag&quot;</span>
+<span class="lineno">   84 </span><span class="spaces">        </span><span class="istickedoff">case tag of</span>
+<span class="lineno">   85 </span><span class="spaces">            </span><span class="istickedoff">&quot;Definition&quot; -&gt;</span>
+<span class="lineno">   86 </span><span class="spaces">                </span><span class="istickedoff">LetDefinition &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">   87 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   88 </span><span class="spaces">            </span><span class="istickedoff">&quot;Comment&quot; -&gt;</span>
+<span class="lineno">   89 </span><span class="spaces">                </span><span class="istickedoff">Comment_ld &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">   90 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   91 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   92 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">fail (&quot;unexpected LetDeclaration tag: &quot; &lt;&gt; Text.unpack tag)</span></span></span>
+<span class="lineno">   93 </span>
+<span class="lineno">   94 </span>
+<span class="lineno">   95 </span>data CaseBranch
+<span class="lineno">   96 </span>    = CaseBranch
+<span class="lineno">   97 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">pattern_cb</span></span></span> :: LocatedIfRequested Pattern
+<span class="lineno">   98 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">body</span></span></span> :: MaybeF LocatedIfRequested Expression
+<span class="lineno">   99 </span>        }
+<span class="lineno">  100 </span>
+<span class="lineno">  101 </span>instance ToPublicAST 'CaseBranchNK where
+<span class="lineno">  102 </span>    type PublicAST 'CaseBranchNK = CaseBranch
+<span class="lineno">  103 </span>
+<span class="lineno">  104 </span>    <span class="decl"><span class="istickedoff">fromRawAST' config = \case</span>
+<span class="lineno">  105 </span><span class="spaces">        </span><span class="istickedoff">AST.CaseBranch c1 c2 c3 pat body -&gt;</span>
+<span class="lineno">  106 </span><span class="spaces">            </span><span class="istickedoff">CaseBranch</span>
+<span class="lineno">  107 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config pat)</span>
+<span class="lineno">  108 </span><span class="spaces">                </span><span class="istickedoff">(JustF $ fromRawAST config body)</span></span>
+<span class="lineno">  109 </span>
+<span class="lineno">  110 </span>instance FromPublicAST 'CaseBranchNK where
+<span class="lineno">  111 </span>    <span class="decl"><span class="istickedoff">toRawAST' = \case</span>
+<span class="lineno">  112 </span><span class="spaces">        </span><span class="istickedoff">CaseBranch pattern body -&gt;</span>
+<span class="lineno">  113 </span><span class="spaces">            </span><span class="istickedoff">AST.CaseBranch [] [] []</span>
+<span class="lineno">  114 </span><span class="spaces">                </span><span class="istickedoff">(toRawAST pattern)</span>
+<span class="lineno">  115 </span><span class="spaces">                </span><span class="istickedoff">(maybeF <span class="nottickedoff">(I.Fix . Identity . toRawAST')</span> toRawAST body)</span></span>
+<span class="lineno">  116 </span>
+<span class="lineno">  117 </span>instance ToPairs CaseBranch where
+<span class="lineno">  118 </span>    <span class="decl"><span class="istickedoff">toPairs = \case</span>
+<span class="lineno">  119 </span><span class="spaces">        </span><span class="istickedoff">CaseBranch pattern body -&gt;</span>
+<span class="lineno">  120 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  121 </span><span class="spaces">                </span><span class="istickedoff">[ &quot;pattern&quot; .= pattern</span>
+<span class="lineno">  122 </span><span class="spaces">                </span><span class="istickedoff">, &quot;body&quot; .= body</span>
+<span class="lineno">  123 </span><span class="spaces">                </span><span class="istickedoff">]</span></span>
+<span class="lineno">  124 </span>
+<span class="lineno">  125 </span>instance ToJSON CaseBranch where
+<span class="lineno">  126 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">  127 </span>    <span class="decl"><span class="istickedoff">toEncoding = pairs . toPairs</span></span>
+<span class="lineno">  128 </span>
+<span class="lineno">  129 </span>instance FromJSON CaseBranch where
+<span class="lineno">  130 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;CaseBranch&quot;</span> $ \obj -&gt; do</span>
+<span class="lineno">  131 </span><span class="spaces">        </span><span class="istickedoff">CaseBranch</span>
+<span class="lineno">  132 </span><span class="spaces">            </span><span class="istickedoff">&lt;$&gt; obj .: &quot;pattern&quot;</span>
+<span class="lineno">  133 </span><span class="spaces">            </span><span class="istickedoff">&lt;*&gt; obj .: &quot;body&quot;</span></span>
+<span class="lineno">  134 </span>
+<span class="lineno">  135 </span>
+<span class="lineno">  136 </span>data Expression
+<span class="lineno">  137 </span>    = UnitLiteral
+<span class="lineno">  138 </span>    | LiteralExpression LiteralValue
+<span class="lineno">  139 </span>    | VariableReferenceExpression Reference
+<span class="lineno">  140 </span>    | FunctionApplication
+<span class="lineno">  141 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">function</span></span></span> :: MaybeF LocatedIfRequested Expression
+<span class="lineno">  142 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">arguments</span></span></span> :: List (MaybeF LocatedIfRequested Expression)
+<span class="lineno">  143 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">display_fa</span></span></span> :: FunctionApplicationDisplay
+<span class="lineno">  144 </span>        }
+<span class="lineno">  145 </span>    | UnaryOperator
+<span class="lineno">  146 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">operator</span></span></span> :: AST.UnaryOperator
+<span class="lineno">  147 </span>        }
+<span class="lineno">  148 </span>    | ListLiteral
+<span class="lineno">  149 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">terms</span></span></span> :: List (LocatedIfRequested Expression)
+<span class="lineno">  150 </span>        }
+<span class="lineno">  151 </span>    | TupleLiteral
+<span class="lineno">  152 </span>        { terms :: List (LocatedIfRequested Expression) -- At least two items
+<span class="lineno">  153 </span>        }
+<span class="lineno">  154 </span>    | RecordLiteral
+<span class="lineno">  155 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">base</span></span></span> :: Maybe LowercaseIdentifier
+<span class="lineno">  156 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">fields</span></span></span> :: Map LowercaseIdentifier (LocatedIfRequested Expression) -- Cannot be empty if base is present
+<span class="lineno">  157 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">display_rl</span></span></span> :: RecordDisplay
+<span class="lineno">  158 </span>        }
+<span class="lineno">  159 </span>    | RecordAccessFunction
+<span class="lineno">  160 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">field</span></span></span> :: LowercaseIdentifier
+<span class="lineno">  161 </span>        }
+<span class="lineno">  162 </span>    | AnonymousFunction
+<span class="lineno">  163 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">parameters</span></span></span> :: List (LocatedIfRequested Pattern) -- Non-empty
+<span class="lineno">  164 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">body</span></span></span> :: LocatedIfRequested Expression
+<span class="lineno">  165 </span>        }
+<span class="lineno">  166 </span>    | LetExpression
+<span class="lineno">  167 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">declarations</span></span></span> :: List (MaybeF LocatedIfRequested LetDeclaration)
+<span class="lineno">  168 </span>        , body :: LocatedIfRequested Expression
+<span class="lineno">  169 </span>        }
+<span class="lineno">  170 </span>    | CaseExpression
+<span class="lineno">  171 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">subject</span></span></span> :: LocatedIfRequested Expression
+<span class="lineno">  172 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">branches</span></span></span> :: List (LocatedIfRequested CaseBranch)
+<span class="lineno">  173 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">display</span></span></span> :: CaseDisplay
+<span class="lineno">  174 </span>        }
+<span class="lineno">  175 </span>    | GLShader
+<span class="lineno">  176 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">shaderSource</span></span></span> :: String
+<span class="lineno">  177 </span>        }
+<span class="lineno">  178 </span>
+<span class="lineno">  179 </span>
+<span class="lineno">  180 </span>instance ToPublicAST 'ExpressionNK where
+<span class="lineno">  181 </span>    type PublicAST 'ExpressionNK = Expression
+<span class="lineno">  182 </span>
+<span class="lineno">  183 </span>    <span class="decl"><span class="istickedoff">fromRawAST' config = \case</span>
+<span class="lineno">  184 </span><span class="spaces">        </span><span class="istickedoff">AST.Unit comments -&gt;</span>
+<span class="lineno">  185 </span><span class="spaces">            </span><span class="istickedoff">UnitLiteral</span>
+<span class="lineno">  186 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  187 </span><span class="spaces">        </span><span class="istickedoff">AST.Literal lit -&gt;</span>
+<span class="lineno">  188 </span><span class="spaces">            </span><span class="istickedoff">LiteralExpression lit</span>
+<span class="lineno">  189 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  190 </span><span class="spaces">        </span><span class="istickedoff">AST.VarExpr var -&gt;</span>
+<span class="lineno">  191 </span><span class="spaces">            </span><span class="istickedoff">VariableReferenceExpression $ mkReference var</span>
+<span class="lineno">  192 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  193 </span><span class="spaces">        </span><span class="istickedoff">AST.App expr args multiline -&gt;</span>
+<span class="lineno">  194 </span><span class="spaces">            </span><span class="istickedoff">FunctionApplication</span>
+<span class="lineno">  195 </span><span class="spaces">                </span><span class="istickedoff">(JustF $ fromRawAST config expr)</span>
+<span class="lineno">  196 </span><span class="spaces">                </span><span class="istickedoff">(fmap (\(C comments a) -&gt; JustF $ fromRawAST config a) args)</span>
+<span class="lineno">  197 </span><span class="spaces">                </span><span class="istickedoff">(FunctionApplicationDisplay ShowAsFunctionApplication)</span>
+<span class="lineno">  198 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  199 </span><span class="spaces">        </span><span class="istickedoff">AST.Binops first rest multiline -&gt;</span>
+<span class="lineno">  200 </span><span class="spaces">            </span><span class="istickedoff">case</span>
+<span class="lineno">  201 </span><span class="spaces">                </span><span class="istickedoff">BinaryOperatorPrecedence.parseElm0_19</span>
+<span class="lineno">  202 </span><span class="spaces">                    </span><span class="istickedoff">first</span>
+<span class="lineno">  203 </span><span class="spaces">                    </span><span class="istickedoff">((\(AST.BinopsClause c1 op c2 expr) -&gt; (op, expr)) &lt;$&gt; rest)</span>
+<span class="lineno">  204 </span><span class="spaces">            </span><span class="istickedoff">of</span>
+<span class="lineno">  205 </span><span class="spaces">                </span><span class="istickedoff">Right tree -&gt;</span>
+<span class="lineno">  206 </span><span class="spaces">                    </span><span class="istickedoff">extract $ buildTree tree</span>
+<span class="lineno">  207 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  208 </span><span class="spaces">                </span><span class="istickedoff">Left message -&gt;</span>
+<span class="lineno">  209 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">error (&quot;invalid binary operator expression: &quot; &lt;&gt; Text.unpack message)</span></span>
+<span class="lineno">  210 </span><span class="spaces">            </span><span class="istickedoff">where</span>
+<span class="lineno">  211 </span><span class="spaces">                </span><span class="istickedoff">buildTree :: BinaryOperatorPrecedence.Tree (Ref [UppercaseIdentifier ]) (ASTNS Located [UppercaseIdentifier] 'ExpressionNK) -&gt; MaybeF LocatedIfRequested Expression</span>
+<span class="lineno">  212 </span><span class="spaces">                </span><span class="istickedoff">buildTree (BinaryOperatorPrecedence.Leaf e) =</span>
+<span class="lineno">  213 </span><span class="spaces">                    </span><span class="istickedoff">JustF $ fromRawAST config e</span>
+<span class="lineno">  214 </span><span class="spaces">                </span><span class="istickedoff">buildTree (BinaryOperatorPrecedence.Branch op e1 e2) =</span>
+<span class="lineno">  215 </span><span class="spaces">                    </span><span class="istickedoff">NothingF $ FunctionApplication</span>
+<span class="lineno">  216 </span><span class="spaces">                        </span><span class="istickedoff">(NothingF $ VariableReferenceExpression $ mkReference op)</span>
+<span class="lineno">  217 </span><span class="spaces">                        </span><span class="istickedoff">(buildTree &lt;$&gt; [ e1, e2 ])</span>
+<span class="lineno">  218 </span><span class="spaces">                        </span><span class="istickedoff">(FunctionApplicationDisplay ShowAsInfix)</span>
+<span class="lineno">  219 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  220 </span><span class="spaces">        </span><span class="istickedoff">AST.Unary op expr -&gt;</span>
+<span class="lineno">  221 </span><span class="spaces">            </span><span class="istickedoff">FunctionApplication</span>
+<span class="lineno">  222 </span><span class="spaces">                </span><span class="istickedoff">(NothingF $ UnaryOperator op)</span>
+<span class="lineno">  223 </span><span class="spaces">                </span><span class="istickedoff">[ JustF $ fromRawAST config expr ]</span>
+<span class="lineno">  224 </span><span class="spaces">                </span><span class="istickedoff">(FunctionApplicationDisplay ShowAsFunctionApplication)</span>
+<span class="lineno">  225 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  226 </span><span class="spaces">        </span><span class="istickedoff">AST.Parens (C comments expr) -&gt;</span>
+<span class="lineno">  227 </span><span class="spaces">            </span><span class="istickedoff">fromRawAST' config $ extract $ I.unFix expr</span>
+<span class="lineno">  228 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  229 </span><span class="spaces">        </span><span class="istickedoff">AST.ExplicitList terms comments multiline -&gt;</span>
+<span class="lineno">  230 </span><span class="spaces">            </span><span class="istickedoff">ListLiteral</span>
+<span class="lineno">  231 </span><span class="spaces">                </span><span class="istickedoff">((\(C comments a) -&gt; fromRawAST config a) &lt;$&gt; AST.toCommentedList terms)</span>
+<span class="lineno">  232 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  233 </span><span class="spaces">        </span><span class="istickedoff">AST.Tuple terms multiline -&gt;</span>
+<span class="lineno">  234 </span><span class="spaces">            </span><span class="istickedoff">TupleLiteral</span>
+<span class="lineno">  235 </span><span class="spaces">                </span><span class="istickedoff">(fmap (\(C comments a) -&gt; fromRawAST config a) terms)</span>
+<span class="lineno">  236 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  237 </span><span class="spaces">        </span><span class="istickedoff">AST.TupleFunction n | <span class="tickonlyfalse">n &lt;= 1</span> -&gt;</span>
+<span class="lineno">  238 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">error (&quot;INVALID TUPLE CONSTRUCTOR: &quot; ++ show n)</span></span>
+<span class="lineno">  239 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  240 </span><span class="spaces">        </span><span class="istickedoff">AST.TupleFunction n -&gt;</span>
+<span class="lineno">  241 </span><span class="spaces">            </span><span class="istickedoff">VariableReferenceExpression</span>
+<span class="lineno">  242 </span><span class="spaces">                </span><span class="istickedoff">(mkReference $ OpRef $ SymbolIdentifier $ replicate (n-1) ',')</span>
+<span class="lineno">  243 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  244 </span><span class="spaces">        </span><span class="istickedoff">AST.Record base fields comments multiline -&gt;</span>
+<span class="lineno">  245 </span><span class="spaces">            </span><span class="istickedoff">RecordLiteral</span>
+<span class="lineno">  246 </span><span class="spaces">                </span><span class="istickedoff">(fmap (\(C comments a) -&gt; a) base)</span>
+<span class="lineno">  247 </span><span class="spaces">                </span><span class="istickedoff">(Map.fromList $ (\(C cp (Pair (C ck key) (C cv value) ml)) -&gt; (key, fromRawAST config value)) &lt;$&gt; AST.toCommentedList fields)</span>
+<span class="lineno">  248 </span><span class="spaces">                </span><span class="istickedoff">$ RecordDisplay</span>
+<span class="lineno">  249 </span><span class="spaces">                    </span><span class="istickedoff">(extract . _key . extract &lt;$&gt; AST.toCommentedList fields)</span>
+<span class="lineno">  250 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  251 </span><span class="spaces">        </span><span class="istickedoff">AST.Access base field -&gt;</span>
+<span class="lineno">  252 </span><span class="spaces">            </span><span class="istickedoff">FunctionApplication</span>
+<span class="lineno">  253 </span><span class="spaces">                </span><span class="istickedoff">(NothingF $ RecordAccessFunction field)</span>
+<span class="lineno">  254 </span><span class="spaces">                </span><span class="istickedoff">[ JustF $ fromRawAST config base ]</span>
+<span class="lineno">  255 </span><span class="spaces">                </span><span class="istickedoff">(FunctionApplicationDisplay ShowAsRecordAccess)</span>
+<span class="lineno">  256 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  257 </span><span class="spaces">        </span><span class="istickedoff">AST.AccessFunction field -&gt;</span>
+<span class="lineno">  258 </span><span class="spaces">            </span><span class="istickedoff">RecordAccessFunction field</span>
+<span class="lineno">  259 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  260 </span><span class="spaces">        </span><span class="istickedoff">AST.Lambda parameters comments body multiline -&gt;</span>
+<span class="lineno">  261 </span><span class="spaces">            </span><span class="istickedoff">AnonymousFunction</span>
+<span class="lineno">  262 </span><span class="spaces">                </span><span class="istickedoff">(fmap (\(C c a) -&gt; fromRawAST config a) parameters)</span>
+<span class="lineno">  263 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config body)</span>
+<span class="lineno">  264 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  265 </span><span class="spaces">        </span><span class="istickedoff">AST.If (AST.IfClause cond' thenBody') rest' (C c3 elseBody) -&gt;</span>
+<span class="lineno">  266 </span><span class="spaces">            </span><span class="istickedoff">ifThenElse cond' thenBody' rest'</span>
+<span class="lineno">  267 </span><span class="spaces">            </span><span class="istickedoff">where</span>
+<span class="lineno">  268 </span><span class="spaces">                </span><span class="istickedoff">ifThenElse (C c1 cond) (C c2 thenBody) rest =</span>
+<span class="lineno">  269 </span><span class="spaces">                    </span><span class="istickedoff">CaseExpression</span>
+<span class="lineno">  270 </span><span class="spaces">                        </span><span class="istickedoff">(fromRawAST config cond)</span>
+<span class="lineno">  271 </span><span class="spaces">                        </span><span class="istickedoff">[ LocatedIfRequested $ NothingF $ CaseBranch</span>
+<span class="lineno">  272 </span><span class="spaces">                            </span><span class="istickedoff">(LocatedIfRequested $ NothingF $ DataPattern (ExternalReference (ModuleName [UppercaseIdentifier &quot;Basics&quot;]) (TagRef () $ UppercaseIdentifier &quot;True&quot;)) []) $</span>
+<span class="lineno">  273 </span><span class="spaces">                            </span><span class="istickedoff">JustF $ fromRawAST config thenBody</span>
+<span class="lineno">  274 </span><span class="spaces">                        </span><span class="istickedoff">, LocatedIfRequested $ NothingF $ CaseBranch</span>
+<span class="lineno">  275 </span><span class="spaces">                            </span><span class="istickedoff">(LocatedIfRequested $ NothingF $ DataPattern (ExternalReference (ModuleName [UppercaseIdentifier &quot;Basics&quot;]) (TagRef () $ UppercaseIdentifier &quot;False&quot;)) []) $</span>
+<span class="lineno">  276 </span><span class="spaces">                            </span><span class="istickedoff">case rest of</span>
+<span class="lineno">  277 </span><span class="spaces">                                </span><span class="istickedoff">[] -&gt; JustF $ fromRawAST config elseBody</span>
+<span class="lineno">  278 </span><span class="spaces">                                </span><span class="istickedoff">C c4 (AST.IfClause nextCond nextBody) : nextRest -&gt;</span>
+<span class="lineno">  279 </span><span class="spaces">                                    </span><span class="istickedoff">NothingF $ ifThenElse nextCond nextBody nextRest</span>
+<span class="lineno">  280 </span><span class="spaces">                        </span><span class="istickedoff">]</span>
+<span class="lineno">  281 </span><span class="spaces">                        </span><span class="istickedoff">(CaseDisplay True)</span>
+<span class="lineno">  282 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  283 </span><span class="spaces">        </span><span class="istickedoff">AST.Let decls comments body -&gt;</span>
+<span class="lineno">  284 </span><span class="spaces">            </span><span class="istickedoff">LetExpression</span>
+<span class="lineno">  285 </span><span class="spaces">                </span><span class="istickedoff">(mkLetDeclarations config decls)</span>
+<span class="lineno">  286 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config body)</span>
+<span class="lineno">  287 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  288 </span><span class="spaces">        </span><span class="istickedoff">AST.Case (C comments subject, multiline) branches -&gt;</span>
+<span class="lineno">  289 </span><span class="spaces">            </span><span class="istickedoff">CaseExpression</span>
+<span class="lineno">  290 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config subject)</span>
+<span class="lineno">  291 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config &lt;$&gt; branches)</span>
+<span class="lineno">  292 </span><span class="spaces">                </span><span class="istickedoff">(CaseDisplay False)</span>
+<span class="lineno">  293 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  294 </span><span class="spaces">        </span><span class="istickedoff">AST.Range _ _ _ -&gt;</span>
+<span class="lineno">  295 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">error &quot;Range syntax is not supported in Elm 0.19&quot;</span></span>
+<span class="lineno">  296 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  297 </span><span class="spaces">        </span><span class="istickedoff">AST.GLShader shader -&gt;</span>
+<span class="lineno">  298 </span><span class="spaces">            </span><span class="istickedoff">GLShader shader</span></span>
+<span class="lineno">  299 </span>
+<span class="lineno">  300 </span>instance FromPublicAST 'ExpressionNK where
+<span class="lineno">  301 </span>    <span class="decl"><span class="istickedoff">toRawAST' = \case</span>
+<span class="lineno">  302 </span><span class="spaces">        </span><span class="istickedoff">UnitLiteral -&gt;</span>
+<span class="lineno">  303 </span><span class="spaces">            </span><span class="istickedoff">AST.Unit []</span>
+<span class="lineno">  304 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  305 </span><span class="spaces">        </span><span class="istickedoff">LiteralExpression lit -&gt;</span>
+<span class="lineno">  306 </span><span class="spaces">            </span><span class="istickedoff">AST.Literal lit</span>
+<span class="lineno">  307 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  308 </span><span class="spaces">        </span><span class="istickedoff">VariableReferenceExpression var -&gt;</span>
+<span class="lineno">  309 </span><span class="spaces">            </span><span class="istickedoff">AST.VarExpr $ toRef var</span>
+<span class="lineno">  310 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  311 </span><span class="spaces">        </span><span class="istickedoff">FunctionApplication function args display -&gt;</span>
+<span class="lineno">  312 </span><span class="spaces">            </span><span class="istickedoff">case (extract function, args) of</span>
+<span class="lineno">  313 </span><span class="spaces">                </span><span class="istickedoff">(UnaryOperator operator, [ single ]) -&gt;</span>
+<span class="lineno">  314 </span><span class="spaces">                    </span><span class="istickedoff">AST.Unary</span>
+<span class="lineno">  315 </span><span class="spaces">                        </span><span class="istickedoff">operator</span>
+<span class="lineno">  316 </span><span class="spaces">                        </span><span class="istickedoff">(maybeF <span class="nottickedoff">(I.Fix . Identity . toRawAST')</span> toRawAST single)</span>
+<span class="lineno">  317 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  318 </span><span class="spaces">                </span><span class="istickedoff">(UnaryOperator _, []) -&gt;</span>
+<span class="lineno">  319 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">undefined</span></span>
+<span class="lineno">  320 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  321 </span><span class="spaces">                </span><span class="istickedoff">(UnaryOperator _, _) -&gt;</span>
+<span class="lineno">  322 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">error &quot;TODO: UnaryOperator with extra arguments&quot;</span></span>
+<span class="lineno">  323 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  324 </span><span class="spaces">                </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  325 </span><span class="spaces">                    </span><span class="istickedoff">AST.App</span>
+<span class="lineno">  326 </span><span class="spaces">                        </span><span class="istickedoff">(maybeF <span class="nottickedoff">(I.Fix . Identity . toRawAST')</span> toRawAST function)</span>
+<span class="lineno">  327 </span><span class="spaces">                        </span><span class="istickedoff">(C [] . maybeF <span class="nottickedoff">(I.Fix . Identity . toRawAST')</span> toRawAST &lt;$&gt; args)</span>
+<span class="lineno">  328 </span><span class="spaces">                        </span><span class="istickedoff">(AST.FAJoinFirst AST.JoinAll)</span>
+<span class="lineno">  329 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  330 </span><span class="spaces">        </span><span class="istickedoff">UnaryOperator _ -&gt;</span>
+<span class="lineno">  331 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">error &quot;UnaryOperator is only valid as the \&quot;function\&quot; of a FunctionApplication node&quot;</span></span>
+<span class="lineno">  332 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  333 </span><span class="spaces">        </span><span class="istickedoff">ListLiteral terms -&gt;</span>
+<span class="lineno">  334 </span><span class="spaces">            </span><span class="istickedoff">AST.ExplicitList</span>
+<span class="lineno">  335 </span><span class="spaces">                </span><span class="istickedoff">(Either.fromRight <span class="nottickedoff">undefined</span> $ AST.fromCommentedList $ C ([], [], Nothing) . toRawAST &lt;$&gt; terms)</span>
+<span class="lineno">  336 </span><span class="spaces">                </span><span class="istickedoff">[]</span>
+<span class="lineno">  337 </span><span class="spaces">                </span><span class="istickedoff">(AST.ForceMultiline True)</span>
+<span class="lineno">  338 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  339 </span><span class="spaces">        </span><span class="istickedoff">TupleLiteral terms -&gt;</span>
+<span class="lineno">  340 </span><span class="spaces">            </span><span class="istickedoff">AST.Tuple</span>
+<span class="lineno">  341 </span><span class="spaces">                </span><span class="istickedoff">(C ([], []) . toRawAST &lt;$&gt; terms)</span>
+<span class="lineno">  342 </span><span class="spaces">                </span><span class="istickedoff">True</span>
+<span class="lineno">  343 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  344 </span><span class="spaces">        </span><span class="istickedoff">RecordLiteral base fields display -&gt;</span>
+<span class="lineno">  345 </span><span class="spaces">            </span><span class="istickedoff">AST.Record</span>
+<span class="lineno">  346 </span><span class="spaces">                </span><span class="istickedoff">(C ([], []) &lt;$&gt; base)</span>
+<span class="lineno">  347 </span><span class="spaces">                </span><span class="istickedoff">(Either.fromRight <span class="nottickedoff">undefined</span> $ AST.fromCommentedList $ C ([], [], Nothing) . (\(field, expression) -&gt; Pair (C [] field) (C [] $ toRawAST expression) (AST.ForceMultiline False)) &lt;$&gt; Map.toList fields)</span>
+<span class="lineno">  348 </span><span class="spaces">                </span><span class="istickedoff">[]</span>
+<span class="lineno">  349 </span><span class="spaces">                </span><span class="istickedoff">(AST.ForceMultiline True)</span>
+<span class="lineno">  350 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  351 </span><span class="spaces">        </span><span class="istickedoff">RecordAccessFunction field -&gt;</span>
+<span class="lineno">  352 </span><span class="spaces">            </span><span class="istickedoff">AST.AccessFunction  field</span>
+<span class="lineno">  353 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  354 </span><span class="spaces">        </span><span class="istickedoff">AnonymousFunction parameters body -&gt;</span>
+<span class="lineno">  355 </span><span class="spaces">            </span><span class="istickedoff">AST.Lambda</span>
+<span class="lineno">  356 </span><span class="spaces">                </span><span class="istickedoff">(C [] . toRawAST &lt;$&gt; parameters)</span>
+<span class="lineno">  357 </span><span class="spaces">                </span><span class="istickedoff">[]</span>
+<span class="lineno">  358 </span><span class="spaces">                </span><span class="istickedoff">(toRawAST body)</span>
+<span class="lineno">  359 </span><span class="spaces">                </span><span class="istickedoff">False</span>
+<span class="lineno">  360 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  361 </span><span class="spaces">        </span><span class="istickedoff">CaseExpression subject branches display -&gt;</span>
+<span class="lineno">  362 </span><span class="spaces">            </span><span class="istickedoff">AST.Case</span>
+<span class="lineno">  363 </span><span class="spaces">                </span><span class="istickedoff">(C ([], []) $ toRawAST subject, False)</span>
+<span class="lineno">  364 </span><span class="spaces">                </span><span class="istickedoff">(toRawAST &lt;$&gt; branches)</span>
+<span class="lineno">  365 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  366 </span><span class="spaces">        </span><span class="istickedoff">LetExpression declarations body -&gt;</span>
+<span class="lineno">  367 </span><span class="spaces">            </span><span class="istickedoff">AST.Let</span>
+<span class="lineno">  368 </span><span class="spaces">                </span><span class="istickedoff">(mconcat $ fmap (fromLetDeclaration . extract) declarations)</span>
+<span class="lineno">  369 </span><span class="spaces">                </span><span class="istickedoff">[]</span>
+<span class="lineno">  370 </span><span class="spaces">                </span><span class="istickedoff">(toRawAST body)</span>
+<span class="lineno">  371 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  372 </span><span class="spaces">        </span><span class="istickedoff">GLShader shaderSource -&gt;</span>
+<span class="lineno">  373 </span><span class="spaces">            </span><span class="istickedoff">AST.GLShader shaderSource</span></span>
+<span class="lineno">  374 </span>
+<span class="lineno">  375 </span>
+<span class="lineno">  376 </span>instance ToJSON Expression where
+<span class="lineno">  377 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">  378 </span>    <span class="decl"><span class="istickedoff">toEncoding = pairs . toPairs</span></span>
+<span class="lineno">  379 </span>
+<span class="lineno">  380 </span>instance ToPairs Expression where
+<span class="lineno">  381 </span>    <span class="decl"><span class="istickedoff">toPairs = \case</span>
+<span class="lineno">  382 </span><span class="spaces">        </span><span class="istickedoff">UnitLiteral -&gt;</span>
+<span class="lineno">  383 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  384 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;UnitLiteral&quot;</span>
+<span class="lineno">  385 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  386 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  387 </span><span class="spaces">        </span><span class="istickedoff">LiteralExpression lit -&gt;</span>
+<span class="lineno">  388 </span><span class="spaces">            </span><span class="istickedoff">toPairs lit</span>
+<span class="lineno">  389 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  390 </span><span class="spaces">        </span><span class="istickedoff">VariableReferenceExpression ref -&gt;</span>
+<span class="lineno">  391 </span><span class="spaces">            </span><span class="istickedoff">toPairs ref</span>
+<span class="lineno">  392 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  393 </span><span class="spaces">        </span><span class="istickedoff">FunctionApplication function arguments display -&gt;</span>
+<span class="lineno">  394 </span><span class="spaces">            </span><span class="istickedoff">mconcat $ Maybe.catMaybes</span>
+<span class="lineno">  395 </span><span class="spaces">                </span><span class="istickedoff">[ Just $ type_ &quot;FunctionApplication&quot;</span>
+<span class="lineno">  396 </span><span class="spaces">                </span><span class="istickedoff">, Just $ &quot;function&quot; .= function</span>
+<span class="lineno">  397 </span><span class="spaces">                </span><span class="istickedoff">, Just $ &quot;arguments&quot; .= arguments</span>
+<span class="lineno">  398 </span><span class="spaces">                </span><span class="istickedoff">, pair &quot;display&quot; &lt;$&gt; toMaybeEncoding display</span>
+<span class="lineno">  399 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  400 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  401 </span><span class="spaces">        </span><span class="istickedoff">UnaryOperator operator -&gt;</span>
+<span class="lineno">  402 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  403 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;UnaryOperator&quot;</span>
+<span class="lineno">  404 </span><span class="spaces">                </span><span class="istickedoff">, &quot;operator&quot; .= operator</span>
+<span class="lineno">  405 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  406 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  407 </span><span class="spaces">        </span><span class="istickedoff">ListLiteral terms -&gt;</span>
+<span class="lineno">  408 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  409 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;ListLiteral&quot;</span>
+<span class="lineno">  410 </span><span class="spaces">                </span><span class="istickedoff">, &quot;terms&quot; .= terms</span>
+<span class="lineno">  411 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  412 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  413 </span><span class="spaces">        </span><span class="istickedoff">TupleLiteral terms -&gt;</span>
+<span class="lineno">  414 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  415 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;TupleLiteral&quot;</span>
+<span class="lineno">  416 </span><span class="spaces">                </span><span class="istickedoff">, &quot;terms&quot; .= terms</span>
+<span class="lineno">  417 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  418 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  419 </span><span class="spaces">        </span><span class="istickedoff">RecordLiteral Nothing fields display -&gt;</span>
+<span class="lineno">  420 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  421 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;RecordLiteral&quot;</span>
+<span class="lineno">  422 </span><span class="spaces">                </span><span class="istickedoff">, &quot;fields&quot; .= fields</span>
+<span class="lineno">  423 </span><span class="spaces">                </span><span class="istickedoff">, &quot;display&quot; .= display</span>
+<span class="lineno">  424 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  425 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  426 </span><span class="spaces">        </span><span class="istickedoff">RecordLiteral (Just base) fields display -&gt;</span>
+<span class="lineno">  427 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  428 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;RecordUpdate&quot;</span>
+<span class="lineno">  429 </span><span class="spaces">                </span><span class="istickedoff">, &quot;base&quot; .= base</span>
+<span class="lineno">  430 </span><span class="spaces">                </span><span class="istickedoff">, &quot;fields&quot; .= fields</span>
+<span class="lineno">  431 </span><span class="spaces">                </span><span class="istickedoff">, &quot;display&quot; .= display</span>
+<span class="lineno">  432 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  433 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  434 </span><span class="spaces">        </span><span class="istickedoff">RecordAccessFunction field -&gt;</span>
+<span class="lineno">  435 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  436 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;RecordAccessFunction&quot;</span>
+<span class="lineno">  437 </span><span class="spaces">                </span><span class="istickedoff">, &quot;field&quot; .= field</span>
+<span class="lineno">  438 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  439 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  440 </span><span class="spaces">        </span><span class="istickedoff">AnonymousFunction parameters body -&gt;</span>
+<span class="lineno">  441 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  442 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;AnonymousFunction&quot;</span>
+<span class="lineno">  443 </span><span class="spaces">                </span><span class="istickedoff">, &quot;parameters&quot; .= parameters</span>
+<span class="lineno">  444 </span><span class="spaces">                </span><span class="istickedoff">, &quot;body&quot; .= body</span>
+<span class="lineno">  445 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  446 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  447 </span><span class="spaces">        </span><span class="istickedoff">LetExpression declarations body -&gt;</span>
+<span class="lineno">  448 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  449 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;LetExpression&quot;</span>
+<span class="lineno">  450 </span><span class="spaces">                </span><span class="istickedoff">, &quot;declarations&quot; .= declarations</span>
+<span class="lineno">  451 </span><span class="spaces">                </span><span class="istickedoff">, &quot;body&quot; .= body</span>
+<span class="lineno">  452 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  453 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  454 </span><span class="spaces">        </span><span class="istickedoff">CaseExpression subject branches display -&gt;</span>
+<span class="lineno">  455 </span><span class="spaces">            </span><span class="istickedoff">mconcat $ Maybe.catMaybes</span>
+<span class="lineno">  456 </span><span class="spaces">                </span><span class="istickedoff">[ Just $ type_ &quot;CaseExpression&quot;</span>
+<span class="lineno">  457 </span><span class="spaces">                </span><span class="istickedoff">, Just $ &quot;subject&quot; .= subject</span>
+<span class="lineno">  458 </span><span class="spaces">                </span><span class="istickedoff">, Just $ &quot;branches&quot; .= branches</span>
+<span class="lineno">  459 </span><span class="spaces">                </span><span class="istickedoff">, pair &quot;display&quot; &lt;$&gt; toMaybeEncoding display</span>
+<span class="lineno">  460 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  461 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  462 </span><span class="spaces">        </span><span class="istickedoff">GLShader shaderSource -&gt;</span>
+<span class="lineno">  463 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  464 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;GLShader&quot;</span>
+<span class="lineno">  465 </span><span class="spaces">                </span><span class="istickedoff">, &quot;shaderSource&quot; .= shaderSource</span>
+<span class="lineno">  466 </span><span class="spaces">                </span><span class="istickedoff">]</span></span>
+<span class="lineno">  467 </span>
+<span class="lineno">  468 </span>instance FromJSON Expression where
+<span class="lineno">  469 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;Expression&quot;</span> $ \obj -&gt; do</span>
+<span class="lineno">  470 </span><span class="spaces">        </span><span class="istickedoff">tag :: Text &lt;- obj .: &quot;tag&quot;</span>
+<span class="lineno">  471 </span><span class="spaces">        </span><span class="istickedoff">case tag of</span>
+<span class="lineno">  472 </span><span class="spaces">            </span><span class="istickedoff">&quot;UnitLiteral&quot; -&gt;</span>
+<span class="lineno">  473 </span><span class="spaces">                </span><span class="istickedoff">return UnitLiteral</span>
+<span class="lineno">  474 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  475 </span><span class="spaces">            </span><span class="istickedoff">&quot;IntLiteral&quot; -&gt;</span>
+<span class="lineno">  476 </span><span class="spaces">                </span><span class="istickedoff">LiteralExpression &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  477 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  478 </span><span class="spaces">            </span><span class="istickedoff">&quot;FloatLiteral&quot; -&gt;</span>
+<span class="lineno">  479 </span><span class="spaces">                </span><span class="istickedoff">LiteralExpression &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  480 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  481 </span><span class="spaces">            </span><span class="istickedoff">&quot;StringLiteral&quot; -&gt;</span>
+<span class="lineno">  482 </span><span class="spaces">                </span><span class="istickedoff">LiteralExpression &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  483 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  484 </span><span class="spaces">            </span><span class="istickedoff">&quot;CharLiteral&quot; -&gt;</span>
+<span class="lineno">  485 </span><span class="spaces">                </span><span class="istickedoff">LiteralExpression &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  486 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  487 </span><span class="spaces">            </span><span class="istickedoff">&quot;VariableReference&quot; -&gt;</span>
+<span class="lineno">  488 </span><span class="spaces">                </span><span class="istickedoff">VariableReferenceExpression &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  489 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  490 </span><span class="spaces">            </span><span class="istickedoff">&quot;ExternalReference&quot; -&gt;</span>
+<span class="lineno">  491 </span><span class="spaces">                </span><span class="istickedoff">VariableReferenceExpression &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  492 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  493 </span><span class="spaces">            </span><span class="istickedoff">&quot;FunctionApplication&quot; -&gt;</span>
+<span class="lineno">  494 </span><span class="spaces">                </span><span class="istickedoff">FunctionApplication</span>
+<span class="lineno">  495 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;function&quot;</span>
+<span class="lineno">  496 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;arguments&quot;</span>
+<span class="lineno">  497 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; return <span class="nottickedoff">(FunctionApplicationDisplay ShowAsFunctionApplication)</span></span>
+<span class="lineno">  498 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  499 </span><span class="spaces">            </span><span class="istickedoff">&quot;UnaryOperator&quot; -&gt;</span>
+<span class="lineno">  500 </span><span class="spaces">                </span><span class="istickedoff">UnaryOperator</span>
+<span class="lineno">  501 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;operator&quot;</span>
+<span class="lineno">  502 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  503 </span><span class="spaces">            </span><span class="istickedoff">&quot;ListLiteral&quot; -&gt;</span>
+<span class="lineno">  504 </span><span class="spaces">                </span><span class="istickedoff">ListLiteral</span>
+<span class="lineno">  505 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;terms&quot;</span>
+<span class="lineno">  506 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  507 </span><span class="spaces">            </span><span class="istickedoff">&quot;TupleLiteral&quot; -&gt;</span>
+<span class="lineno">  508 </span><span class="spaces">                </span><span class="istickedoff">TupleLiteral</span>
+<span class="lineno">  509 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;terms&quot;</span>
+<span class="lineno">  510 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  511 </span><span class="spaces">            </span><span class="istickedoff">&quot;RecordLiteral&quot; -&gt;</span>
+<span class="lineno">  512 </span><span class="spaces">                </span><span class="istickedoff">RecordLiteral Nothing</span>
+<span class="lineno">  513 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;fields&quot;</span>
+<span class="lineno">  514 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; return <span class="nottickedoff">(RecordDisplay [])</span></span>
+<span class="lineno">  515 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  516 </span><span class="spaces">            </span><span class="istickedoff">&quot;RecordUpdate&quot; -&gt;</span>
+<span class="lineno">  517 </span><span class="spaces">                </span><span class="istickedoff">RecordLiteral</span>
+<span class="lineno">  518 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; (Just &lt;$&gt; obj .: &quot;base&quot;)</span>
+<span class="lineno">  519 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;fields&quot;</span>
+<span class="lineno">  520 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; return <span class="nottickedoff">(RecordDisplay [])</span></span>
+<span class="lineno">  521 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  522 </span><span class="spaces">            </span><span class="istickedoff">&quot;RecordAccessFunction&quot; -&gt;</span>
+<span class="lineno">  523 </span><span class="spaces">                </span><span class="istickedoff">RecordAccessFunction</span>
+<span class="lineno">  524 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;field&quot;</span>
+<span class="lineno">  525 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  526 </span><span class="spaces">            </span><span class="istickedoff">&quot;AnonymousFunction&quot; -&gt;</span>
+<span class="lineno">  527 </span><span class="spaces">                </span><span class="istickedoff">AnonymousFunction</span>
+<span class="lineno">  528 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;parameters&quot;</span>
+<span class="lineno">  529 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;body&quot;</span>
+<span class="lineno">  530 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  531 </span><span class="spaces">            </span><span class="istickedoff">&quot;CaseExpression&quot; -&gt;</span>
+<span class="lineno">  532 </span><span class="spaces">                </span><span class="istickedoff">CaseExpression</span>
+<span class="lineno">  533 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;subject&quot;</span>
+<span class="lineno">  534 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;branches&quot;</span>
+<span class="lineno">  535 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; return <span class="nottickedoff">(CaseDisplay False)</span></span>
+<span class="lineno">  536 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  537 </span><span class="spaces">            </span><span class="istickedoff">&quot;LetExpression&quot; -&gt;</span>
+<span class="lineno">  538 </span><span class="spaces">                </span><span class="istickedoff">LetExpression</span>
+<span class="lineno">  539 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;declarations&quot;</span>
+<span class="lineno">  540 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;body&quot;</span>
+<span class="lineno">  541 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  542 </span><span class="spaces">            </span><span class="istickedoff">&quot;GLShader&quot; -&gt;</span>
+<span class="lineno">  543 </span><span class="spaces">                </span><span class="istickedoff">GLShader</span>
+<span class="lineno">  544 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;shaderSource&quot;</span>
+<span class="lineno">  545 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  546 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  547 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">return $ LiteralExpression $ Str (&quot;TODO: &quot; &lt;&gt; show (Object obj)) SingleQuotedString</span></span></span>
+<span class="lineno">  548 </span>
+<span class="lineno">  549 </span>
+<span class="lineno">  550 </span>newtype FunctionApplicationDisplay
+<span class="lineno">  551 </span>    = FunctionApplicationDisplay
+<span class="lineno">  552 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">showAs</span></span></span> :: FunctionApplicationShowAs
+<span class="lineno">  553 </span>        }
+<span class="lineno">  554 </span>
+<span class="lineno">  555 </span>instance ToMaybeJSON FunctionApplicationDisplay where
+<span class="lineno">  556 </span>    <span class="decl"><span class="istickedoff">toMaybeEncoding = \case</span>
+<span class="lineno">  557 </span><span class="spaces">        </span><span class="istickedoff">FunctionApplicationDisplay showAs -&gt;</span>
+<span class="lineno">  558 </span><span class="spaces">            </span><span class="istickedoff">case</span>
+<span class="lineno">  559 </span><span class="spaces">                </span><span class="istickedoff">Maybe.catMaybes</span>
+<span class="lineno">  560 </span><span class="spaces">                    </span><span class="istickedoff">[ case showAs of</span>
+<span class="lineno">  561 </span><span class="spaces">                        </span><span class="istickedoff">ShowAsRecordAccess -&gt; Just (&quot;showAsRecordAccess&quot; .= True)</span>
+<span class="lineno">  562 </span><span class="spaces">                        </span><span class="istickedoff">ShowAsInfix -&gt; Just (&quot;showAsInfix&quot; .= True)</span>
+<span class="lineno">  563 </span><span class="spaces">                        </span><span class="istickedoff">ShowAsFunctionApplication -&gt; Nothing</span>
+<span class="lineno">  564 </span><span class="spaces">                    </span><span class="istickedoff">]</span>
+<span class="lineno">  565 </span><span class="spaces">            </span><span class="istickedoff">of</span>
+<span class="lineno">  566 </span><span class="spaces">                </span><span class="istickedoff">[] -&gt; Nothing</span>
+<span class="lineno">  567 </span><span class="spaces">                </span><span class="istickedoff">some -&gt; Just $ pairs $ mconcat some</span></span>
+<span class="lineno">  568 </span>
+<span class="lineno">  569 </span>
+<span class="lineno">  570 </span>data FunctionApplicationShowAs
+<span class="lineno">  571 </span>    = ShowAsRecordAccess
+<span class="lineno">  572 </span>    | ShowAsInfix
+<span class="lineno">  573 </span>    | ShowAsFunctionApplication
+<span class="lineno">  574 </span>
+<span class="lineno">  575 </span>
+<span class="lineno">  576 </span>newtype CaseDisplay
+<span class="lineno">  577 </span>    = CaseDisplay
+<span class="lineno">  578 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">showAsIf</span></span></span> :: Bool
+<span class="lineno">  579 </span>        }
+<span class="lineno">  580 </span>    deriving (Generic)
+<span class="lineno">  581 </span>
+<span class="lineno">  582 </span>instance ToMaybeJSON CaseDisplay where
+<span class="lineno">  583 </span>    <span class="decl"><span class="istickedoff">toMaybeEncoding = \case</span>
+<span class="lineno">  584 </span><span class="spaces">        </span><span class="istickedoff">CaseDisplay showAsIf -&gt;</span>
+<span class="lineno">  585 </span><span class="spaces">            </span><span class="istickedoff">case</span>
+<span class="lineno">  586 </span><span class="spaces">                </span><span class="istickedoff">Maybe.catMaybes</span>
+<span class="lineno">  587 </span><span class="spaces">                    </span><span class="istickedoff">[ if showAsIf</span>
+<span class="lineno">  588 </span><span class="spaces">                        </span><span class="istickedoff">then Just (&quot;showAsIf&quot; .= True)</span>
+<span class="lineno">  589 </span><span class="spaces">                        </span><span class="istickedoff">else Nothing</span>
+<span class="lineno">  590 </span><span class="spaces">                    </span><span class="istickedoff">]</span>
+<span class="lineno">  591 </span><span class="spaces">            </span><span class="istickedoff">of</span>
+<span class="lineno">  592 </span><span class="spaces">                </span><span class="istickedoff">[] -&gt; Nothing</span>
+<span class="lineno">  593 </span><span class="spaces">                </span><span class="istickedoff">some -&gt; Just $ pairs $ mconcat some</span></span>
+<span class="lineno">  594 </span>
+<span class="lineno">  595 </span>
+<span class="lineno">  596 </span>--
+<span class="lineno">  597 </span>-- Definition
+<span class="lineno">  598 </span>--
+<span class="lineno">  599 </span>
+<span class="lineno">  600 </span>
+<span class="lineno">  601 </span>data TypedParameter
+<span class="lineno">  602 </span>    = TypedParameter
+<span class="lineno">  603 </span>        { <span class="istickedoff"><span class="decl"><span class="istickedoff">pattern_tp</span></span></span> :: LocatedIfRequested Pattern
+<span class="lineno">  604 </span>        , <span class="istickedoff"><span class="decl"><span class="istickedoff">type_tp</span></span></span> :: Maybe (LocatedIfRequested Type_)
+<span class="lineno">  605 </span>        }
+<span class="lineno">  606 </span>
+<span class="lineno">  607 </span>instance ToJSON TypedParameter where
+<span class="lineno">  608 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">  609 </span>    <span class="decl"><span class="istickedoff">toEncoding = \case</span>
+<span class="lineno">  610 </span><span class="spaces">        </span><span class="istickedoff">TypedParameter pattern typ -&gt;</span>
+<span class="lineno">  611 </span><span class="spaces">            </span><span class="istickedoff">pairs $ mconcat</span>
+<span class="lineno">  612 </span><span class="spaces">                </span><span class="istickedoff">[ &quot;pattern&quot; .= pattern</span>
+<span class="lineno">  613 </span><span class="spaces">                </span><span class="istickedoff">, &quot;type&quot; .= typ</span>
+<span class="lineno">  614 </span><span class="spaces">                </span><span class="istickedoff">]</span></span>
+<span class="lineno">  615 </span>
+<span class="lineno">  616 </span>instance FromJSON TypedParameter where
+<span class="lineno">  617 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;TypedParameter&quot;</span> $ \obj -&gt;</span>
+<span class="lineno">  618 </span><span class="spaces">        </span><span class="istickedoff">TypedParameter</span>
+<span class="lineno">  619 </span><span class="spaces">            </span><span class="istickedoff">&lt;$&gt; obj .: &quot;pattern&quot;</span>
+<span class="lineno">  620 </span><span class="spaces">            </span><span class="istickedoff">&lt;*&gt; obj .:? &quot;type&quot;</span></span>
+<span class="lineno">  621 </span>
+<span class="lineno">  622 </span>
+<span class="lineno">  623 </span>data Definition
+<span class="lineno">  624 </span>    = Definition
+<span class="lineno">  625 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">name_d</span></span></span> :: LowercaseIdentifier
+<span class="lineno">  626 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">parameters_d</span></span></span> :: List TypedParameter
+<span class="lineno">  627 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">returnType</span></span></span> :: Maybe (LocatedIfRequested Type_)
+<span class="lineno">  628 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">expression</span></span></span> :: LocatedIfRequested Expression
+<span class="lineno">  629 </span>        }
+<span class="lineno">  630 </span>    | TODO_Definition (List String)
+<span class="lineno">  631 </span>
+<span class="lineno">  632 </span>mkDefinition ::
+<span class="lineno">  633 </span>    Config
+<span class="lineno">  634 </span>    -&gt; ASTNS1 Located [UppercaseIdentifier] 'PatternNK
+<span class="lineno">  635 </span>    -&gt; List (AST.C1 'AST.BeforeTerm (ASTNS Located [UppercaseIdentifier] 'PatternNK))
+<span class="lineno">  636 </span>    -&gt; Maybe (AST.C2 'AST.BeforeSeparator 'AST.AfterSeparator (ASTNS Located [UppercaseIdentifier] 'TypeNK))
+<span class="lineno">  637 </span>    -&gt; ASTNS Located [UppercaseIdentifier] 'ExpressionNK
+<span class="lineno">  638 </span>    -&gt; Definition
+<span class="lineno">  639 </span><span class="decl"><span class="istickedoff">mkDefinition config pat args annotation expr =</span>
+<span class="lineno">  640 </span><span class="spaces">    </span><span class="istickedoff">case pat of</span>
+<span class="lineno">  641 </span><span class="spaces">        </span><span class="istickedoff">AST.VarPattern name -&gt;</span>
+<span class="lineno">  642 </span><span class="spaces">            </span><span class="istickedoff">let</span>
+<span class="lineno">  643 </span><span class="spaces">                </span><span class="istickedoff">(typedParams, returnType) =</span>
+<span class="lineno">  644 </span><span class="spaces">                    </span><span class="istickedoff">maybe</span>
+<span class="lineno">  645 </span><span class="spaces">                        </span><span class="istickedoff">( fmap (, Nothing) args, Nothing )</span>
+<span class="lineno">  646 </span><span class="spaces">                        </span><span class="istickedoff">((\(a,b) -&gt; ( fmap (fmap Just) a, Just b )) . PatternMatching.matchType args . (\(C (c1, c2) t) -&gt; t))</span>
+<span class="lineno">  647 </span><span class="spaces">                        </span><span class="istickedoff">annotation</span>
+<span class="lineno">  648 </span><span class="spaces">            </span><span class="istickedoff">in</span>
+<span class="lineno">  649 </span><span class="spaces">            </span><span class="istickedoff">Definition</span>
+<span class="lineno">  650 </span><span class="spaces">                </span><span class="istickedoff">name</span>
+<span class="lineno">  651 </span><span class="spaces">                </span><span class="istickedoff">(fmap (\(C c pat, typ) -&gt; TypedParameter (fromRawAST config pat) (fmap (fromRawAST config) typ)) typedParams)</span>
+<span class="lineno">  652 </span><span class="spaces">                </span><span class="istickedoff">(fmap (fromRawAST config) returnType)</span>
+<span class="lineno">  653 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config expr)</span>
+<span class="lineno">  654 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  655 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  656 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">TODO_Definition</span></span>
+<span class="lineno">  657 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">[ show pat</span></span>
+<span class="lineno">  658 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">, show args</span></span>
+<span class="lineno">  659 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">, show annotation</span></span>
+<span class="lineno">  660 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">, show expr</span></span>
+<span class="lineno">  661 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">]</span></span></span>
+<span class="lineno">  662 </span>
+<span class="lineno">  663 </span>fromDefinition :: Definition -&gt; List (ASTNS Identity [UppercaseIdentifier] 'CommonDeclarationNK)
+<span class="lineno">  664 </span><span class="decl"><span class="istickedoff">fromDefinition = \case</span>
+<span class="lineno">  665 </span><span class="spaces">    </span><span class="istickedoff">Definition name parameters Nothing expression -&gt;</span>
+<span class="lineno">  666 </span><span class="spaces">        </span><span class="istickedoff">pure $ I.Fix $ Identity $ AST.Definition</span>
+<span class="lineno">  667 </span><span class="spaces">            </span><span class="istickedoff">(I.Fix $ Identity $ AST.VarPattern name)</span>
+<span class="lineno">  668 </span><span class="spaces">            </span><span class="istickedoff">(C [] . toRawAST . pattern_tp &lt;$&gt; parameters)</span>
+<span class="lineno">  669 </span><span class="spaces">            </span><span class="istickedoff">[]</span>
+<span class="lineno">  670 </span><span class="spaces">            </span><span class="istickedoff">(toRawAST expression)</span>
+<span class="lineno">  671 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  672 </span><span class="spaces">    </span><span class="istickedoff">Definition name [] (Just typ) expression -&gt;</span>
+<span class="lineno">  673 </span><span class="spaces">        </span><span class="istickedoff">[ I.Fix $ Identity $ AST.TypeAnnotation</span>
+<span class="lineno">  674 </span><span class="spaces">            </span><span class="istickedoff">(C [] $ VarRef () name)</span>
+<span class="lineno">  675 </span><span class="spaces">            </span><span class="istickedoff">(C [] $ toRawAST typ)</span>
+<span class="lineno">  676 </span><span class="spaces">        </span><span class="istickedoff">, I.Fix $ Identity $ AST.Definition</span>
+<span class="lineno">  677 </span><span class="spaces">            </span><span class="istickedoff">(I.Fix $ Identity $ AST.VarPattern name)</span>
+<span class="lineno">  678 </span><span class="spaces">            </span><span class="istickedoff">[]</span>
+<span class="lineno">  679 </span><span class="spaces">            </span><span class="istickedoff">[]</span>
+<span class="lineno">  680 </span><span class="spaces">            </span><span class="istickedoff">(toRawAST expression)</span>
+<span class="lineno">  681 </span><span class="spaces">        </span><span class="istickedoff">]</span>
+<span class="lineno">  682 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  683 </span><span class="spaces">    </span><span class="istickedoff">Definition name parameters (Just typ) expression -&gt;</span>
+<span class="lineno">  684 </span><span class="spaces">        </span><span class="istickedoff">[ I.Fix $ Identity $ AST.TypeAnnotation</span>
+<span class="lineno">  685 </span><span class="spaces">            </span><span class="istickedoff">(C [] $ VarRef () name)</span>
+<span class="lineno">  686 </span><span class="spaces">            </span><span class="istickedoff">(C [] $ toRawAST $ LocatedIfRequested $ NothingF $ FunctionType typ (fromMaybe <span class="nottickedoff">(LocatedIfRequested $ NothingF UnitType)</span> . type_tp &lt;$&gt; parameters))</span>
+<span class="lineno">  687 </span><span class="spaces">        </span><span class="istickedoff">, I.Fix $ Identity $ AST.Definition</span>
+<span class="lineno">  688 </span><span class="spaces">            </span><span class="istickedoff">(I.Fix $ Identity $ AST.VarPattern name)</span>
+<span class="lineno">  689 </span><span class="spaces">            </span><span class="istickedoff">(C [] . toRawAST . pattern_tp &lt;$&gt; parameters)</span>
+<span class="lineno">  690 </span><span class="spaces">            </span><span class="istickedoff">[]</span>
+<span class="lineno">  691 </span><span class="spaces">            </span><span class="istickedoff">(toRawAST expression)</span>
+<span class="lineno">  692 </span><span class="spaces">        </span><span class="istickedoff">]</span></span>
+<span class="lineno">  693 </span>
+<span class="lineno">  694 </span>type DefinitionBuilder a
+<span class="lineno">  695 </span>    = Either a (ASTNS1 Located [UppercaseIdentifier] 'CommonDeclarationNK)
+<span class="lineno">  696 </span>
+<span class="lineno">  697 </span>mkDefinitions ::
+<span class="lineno">  698 </span>    forall a.
+<span class="lineno">  699 </span>    Config
+<span class="lineno">  700 </span>    -&gt; (Definition -&gt; a)
+<span class="lineno">  701 </span>    -&gt; List (MaybeF LocatedIfRequested (DefinitionBuilder a))
+<span class="lineno">  702 </span>    -&gt; List (MaybeF LocatedIfRequested a)
+<span class="lineno">  703 </span><span class="decl"><span class="istickedoff">mkDefinitions config fromDef items =</span>
+<span class="lineno">  704 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  705 </span><span class="spaces">        </span><span class="istickedoff">collectAnnotation :: DefinitionBuilder a -&gt; Maybe (LowercaseIdentifier, AST.C2 'AST.BeforeSeparator 'AST.AfterSeparator (ASTNS Located [UppercaseIdentifier] 'TypeNK))</span>
+<span class="lineno">  706 </span><span class="spaces">        </span><span class="istickedoff">collectAnnotation decl =</span>
+<span class="lineno">  707 </span><span class="spaces">            </span><span class="istickedoff">case decl of</span>
+<span class="lineno">  708 </span><span class="spaces">                </span><span class="istickedoff">Right (AST.TypeAnnotation (C preColon (VarRef () name)) (C postColon typ)) -&gt;</span>
+<span class="lineno">  709 </span><span class="spaces">                    </span><span class="istickedoff">Just (name, C (<span class="nottickedoff">preColon</span>, <span class="nottickedoff">postColon</span>) typ)</span>
+<span class="lineno">  710 </span><span class="spaces">                </span><span class="istickedoff">_ -&gt; Nothing</span>
+<span class="lineno">  711 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  712 </span><span class="spaces">        </span><span class="istickedoff">annotations :: Map LowercaseIdentifier (AST.C2 'AST.BeforeSeparator 'AST.AfterSeparator (ASTNS Located [UppercaseIdentifier] 'TypeNK))</span>
+<span class="lineno">  713 </span><span class="spaces">        </span><span class="istickedoff">annotations =</span>
+<span class="lineno">  714 </span><span class="spaces">            </span><span class="istickedoff">Map.fromList $ mapMaybe (collectAnnotation . extract) items</span>
+<span class="lineno">  715 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  716 </span><span class="spaces">        </span><span class="istickedoff">merge :: DefinitionBuilder a -&gt; Maybe a</span>
+<span class="lineno">  717 </span><span class="spaces">        </span><span class="istickedoff">merge decl =</span>
+<span class="lineno">  718 </span><span class="spaces">            </span><span class="istickedoff">case decl of</span>
+<span class="lineno">  719 </span><span class="spaces">                </span><span class="istickedoff">Right (AST.Definition (I.Fix (A _ pat)) args comments expr) -&gt;</span>
+<span class="lineno">  720 </span><span class="spaces">                    </span><span class="istickedoff">let</span>
+<span class="lineno">  721 </span><span class="spaces">                        </span><span class="istickedoff">annotation =</span>
+<span class="lineno">  722 </span><span class="spaces">                            </span><span class="istickedoff">case pat of</span>
+<span class="lineno">  723 </span><span class="spaces">                                </span><span class="istickedoff">AST.VarPattern name -&gt;</span>
+<span class="lineno">  724 </span><span class="spaces">                                    </span><span class="istickedoff">Map.lookup name annotations</span>
+<span class="lineno">  725 </span><span class="spaces">                                </span><span class="istickedoff">_ -&gt; <span class="nottickedoff">Nothing</span></span>
+<span class="lineno">  726 </span><span class="spaces">                    </span><span class="istickedoff">in</span>
+<span class="lineno">  727 </span><span class="spaces">                    </span><span class="istickedoff">Just $ fromDef $ mkDefinition config pat args annotation expr</span>
+<span class="lineno">  728 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  729 </span><span class="spaces">                </span><span class="istickedoff">Right (AST.TypeAnnotation _ _) -&gt;</span>
+<span class="lineno">  730 </span><span class="spaces">                    </span><span class="istickedoff">-- TODO: retain annotations that don't have a matching definition</span>
+<span class="lineno">  731 </span><span class="spaces">                    </span><span class="istickedoff">Nothing</span>
+<span class="lineno">  732 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  733 </span><span class="spaces">                </span><span class="istickedoff">Left a -&gt;</span>
+<span class="lineno">  734 </span><span class="spaces">                    </span><span class="istickedoff">Just a</span>
+<span class="lineno">  735 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  736 </span><span class="spaces">    </span><span class="istickedoff">mapMaybe (traverse merge) items</span></span>
+<span class="lineno">  737 </span>
+<span class="lineno">  738 </span>instance ToJSON Definition where
+<span class="lineno">  739 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">  740 </span>    <span class="decl"><span class="nottickedoff">toEncoding = pairs . toPairs</span></span>
+<span class="lineno">  741 </span>
+<span class="lineno">  742 </span>instance ToPairs Definition where
+<span class="lineno">  743 </span>    <span class="decl"><span class="istickedoff">toPairs = \case</span>
+<span class="lineno">  744 </span><span class="spaces">        </span><span class="istickedoff">Definition name parameters returnType expression -&gt;</span>
+<span class="lineno">  745 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  746 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;Definition&quot;</span>
+<span class="lineno">  747 </span><span class="spaces">                </span><span class="istickedoff">, &quot;name&quot; .= name</span>
+<span class="lineno">  748 </span><span class="spaces">                </span><span class="istickedoff">, &quot;parameters&quot; .= parameters</span>
+<span class="lineno">  749 </span><span class="spaces">                </span><span class="istickedoff">, &quot;returnType&quot; .= returnType</span>
+<span class="lineno">  750 </span><span class="spaces">                </span><span class="istickedoff">, &quot;expression&quot; .= expression</span>
+<span class="lineno">  751 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  752 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  753 </span><span class="spaces">        </span><span class="istickedoff">TODO_Definition info -&gt;</span>
+<span class="lineno">  754 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">mconcat</span></span>
+<span class="lineno">  755 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">[ type_ &quot;TODO: Definition&quot;</span></span>
+<span class="lineno">  756 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">, &quot;$&quot; .= info</span></span>
+<span class="lineno">  757 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">]</span></span></span>
+<span class="lineno">  758 </span>
+<span class="lineno">  759 </span>instance FromJSON Definition where
+<span class="lineno">  760 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;Definition&quot;</span> $ \obj -&gt; do</span>
+<span class="lineno">  761 </span><span class="spaces">        </span><span class="istickedoff">tag &lt;- obj .: &quot;tag&quot;</span>
+<span class="lineno">  762 </span><span class="spaces">        </span><span class="istickedoff">case tag of</span>
+<span class="lineno">  763 </span><span class="spaces">            </span><span class="istickedoff">&quot;Definition&quot; -&gt;</span>
+<span class="lineno">  764 </span><span class="spaces">                </span><span class="istickedoff">Definition</span>
+<span class="lineno">  765 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;name&quot;</span>
+<span class="lineno">  766 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .:? &quot;parameters&quot; .!= []</span>
+<span class="lineno">  767 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .:? &quot;returnType&quot;</span>
+<span class="lineno">  768 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;expression&quot;</span>
+<span class="lineno">  769 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  770 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  771 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">fail (&quot;unexpected Definition tag: &quot; &lt;&gt; tag)</span></span></span>
+<span class="lineno">  772 </span>
+
+</pre>
+</body>
+</html>

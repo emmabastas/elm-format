@@ -1,0 +1,152 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module AST.MatchReferences (MatchedNamespace(..), fromMatched, matchReferences, applyReferences) where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import AST.V0_16
+<span class="lineno">    4 </span>import AST.Structure
+<span class="lineno">    5 </span>import Control.Applicative ((&lt;|&gt;))
+<span class="lineno">    6 </span>import Data.Coapplicative
+<span class="lineno">    7 </span>import ElmFormat.ImportInfo (ImportInfo)
+<span class="lineno">    8 </span>
+<span class="lineno">    9 </span>import qualified Data.Bimap as Bimap
+<span class="lineno">   10 </span>import qualified Data.Map.Strict as Dict
+<span class="lineno">   11 </span>import qualified Data.Maybe as Maybe
+<span class="lineno">   12 </span>import qualified Data.Set as Set
+<span class="lineno">   13 </span>import qualified ElmFormat.ImportInfo as ImportInfo
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>
+<span class="lineno">   16 </span>data MatchedNamespace t
+<span class="lineno">   17 </span>    = Local
+<span class="lineno">   18 </span>    | MatchedImport Bool t -- Bool is True if it was originally qualified
+<span class="lineno">   19 </span>    | Unmatched t -- The given namespace is clearly specified, but it is not a known import
+<span class="lineno">   20 </span>    | UnmatchedUnqualified [t] -- An unqualified reference that doesn't match anything known. List is namespaces that we don't know the contents of that are possibilities for a match
+<span class="lineno">   21 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Ord</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>fromMatched :: t -&gt; MatchedNamespace t -&gt; t
+<span class="lineno">   25 </span><span class="decl"><span class="istickedoff">fromMatched empty Local = empty</span>
+<span class="lineno">   26 </span><span class="spaces"></span><span class="istickedoff">fromMatched _ (MatchedImport _ t) = t</span>
+<span class="lineno">   27 </span><span class="spaces"></span><span class="istickedoff">fromMatched _ (Unmatched t) = t</span>
+<span class="lineno">   28 </span><span class="spaces"></span><span class="istickedoff">fromMatched empty (UnmatchedUnqualified _) = empty</span></span>
+<span class="lineno">   29 </span>
+<span class="lineno">   30 </span>
+<span class="lineno">   31 </span>matchReferences ::
+<span class="lineno">   32 </span>    (Coapplicative annf, Ord u) =&gt;
+<span class="lineno">   33 </span>    ImportInfo [u]
+<span class="lineno">   34 </span>    -&gt; ASTNS annf [u] kind
+<span class="lineno">   35 </span>    -&gt; ASTNS annf (MatchedNamespace [u]) kind
+<span class="lineno">   36 </span><span class="decl"><span class="istickedoff">matchReferences importInfo =</span>
+<span class="lineno">   37 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">   38 </span><span class="spaces">        </span><span class="istickedoff">aliases = Bimap.toMap $ ImportInfo._aliases importInfo</span>
+<span class="lineno">   39 </span><span class="spaces">        </span><span class="istickedoff">imports = ImportInfo._directImports importInfo</span>
+<span class="lineno">   40 </span><span class="spaces">        </span><span class="istickedoff">exposed = ImportInfo._exposed importInfo</span>
+<span class="lineno">   41 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">unresolvedExposingAll = ImportInfo._unresolvedExposingAll importInfo</span></span>
+<span class="lineno">   42 </span><span class="spaces">        </span><span class="istickedoff">unmatchedUnqualified = UnmatchedUnqualified $ <span class="nottickedoff">Set.toList unresolvedExposingAll</span></span>
+<span class="lineno">   43 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   44 </span><span class="spaces">        </span><span class="istickedoff">f locals ns identifier =</span>
+<span class="lineno">   45 </span><span class="spaces">            </span><span class="istickedoff">case ns of</span>
+<span class="lineno">   46 </span><span class="spaces">                </span><span class="istickedoff">[] -&gt;</span>
+<span class="lineno">   47 </span><span class="spaces">                    </span><span class="istickedoff">case Dict.lookup identifier locals of</span>
+<span class="lineno">   48 </span><span class="spaces">                        </span><span class="istickedoff">Just () -&gt; Local</span>
+<span class="lineno">   49 </span><span class="spaces">                        </span><span class="istickedoff">Nothing -&gt;</span>
+<span class="lineno">   50 </span><span class="spaces">                            </span><span class="istickedoff">case Dict.lookup identifier exposed of</span>
+<span class="lineno">   51 </span><span class="spaces">                                </span><span class="istickedoff">Nothing -&gt; unmatchedUnqualified</span>
+<span class="lineno">   52 </span><span class="spaces">                                </span><span class="istickedoff">Just exposedFrom -&gt; MatchedImport <span class="nottickedoff">False</span> exposedFrom</span>
+<span class="lineno">   53 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   54 </span><span class="spaces">                </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   55 </span><span class="spaces">                    </span><span class="istickedoff">let</span>
+<span class="lineno">   56 </span><span class="spaces">                        </span><span class="istickedoff">self =</span>
+<span class="lineno">   57 </span><span class="spaces">                            </span><span class="istickedoff">if Set.member ns imports then</span>
+<span class="lineno">   58 </span><span class="spaces">                                </span><span class="istickedoff">Just ns</span>
+<span class="lineno">   59 </span><span class="spaces">                            </span><span class="istickedoff">else</span>
+<span class="lineno">   60 </span><span class="spaces">                                </span><span class="istickedoff">Nothing</span>
+<span class="lineno">   61 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   62 </span><span class="spaces">                        </span><span class="istickedoff">fromAlias =</span>
+<span class="lineno">   63 </span><span class="spaces">                            </span><span class="istickedoff">Dict.lookup ns aliases</span>
+<span class="lineno">   64 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   65 </span><span class="spaces">                        </span><span class="istickedoff">resolved =</span>
+<span class="lineno">   66 </span><span class="spaces">                            </span><span class="istickedoff">fromAlias &lt;|&gt; self</span>
+<span class="lineno">   67 </span><span class="spaces">                    </span><span class="istickedoff">in</span>
+<span class="lineno">   68 </span><span class="spaces">                    </span><span class="istickedoff">case resolved of</span>
+<span class="lineno">   69 </span><span class="spaces">                        </span><span class="istickedoff">Nothing -&gt; Unmatched ns</span>
+<span class="lineno">   70 </span><span class="spaces">                        </span><span class="istickedoff">Just single -&gt; MatchedImport <span class="nottickedoff">True</span> single</span>
+<span class="lineno">   71 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   72 </span><span class="spaces">        </span><span class="istickedoff">defineLocal name = Dict.insert name ()</span>
+<span class="lineno">   73 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   74 </span><span class="spaces">        </span><span class="istickedoff">mapTypeRef locals (ns, u) = (f locals ns (TypeName u), u)</span>
+<span class="lineno">   75 </span><span class="spaces">        </span><span class="istickedoff">mapCtorRef locals (ns, u) = (f locals ns (CtorName u), u)</span>
+<span class="lineno">   76 </span><span class="spaces">        </span><span class="istickedoff">mapVarRef locals (VarRef ns l) = VarRef (f locals ns (VarName l)) l</span>
+<span class="lineno">   77 </span><span class="spaces">        </span><span class="istickedoff">mapVarRef locals (TagRef ns u) = TagRef (f locals ns (CtorName u)) u</span>
+<span class="lineno">   78 </span><span class="spaces">        </span><span class="istickedoff">mapVarRef _ (OpRef op) = OpRef op</span>
+<span class="lineno">   79 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">   80 </span><span class="spaces">    </span><span class="istickedoff">topDownReferencesWithContext</span>
+<span class="lineno">   81 </span><span class="spaces">        </span><span class="istickedoff">defineLocal</span>
+<span class="lineno">   82 </span><span class="spaces">        </span><span class="istickedoff">mapTypeRef mapCtorRef mapVarRef</span>
+<span class="lineno">   83 </span><span class="spaces">        </span><span class="istickedoff">mempty</span></span>
+<span class="lineno">   84 </span>
+<span class="lineno">   85 </span>
+<span class="lineno">   86 </span>applyReferences ::
+<span class="lineno">   87 </span>    (Coapplicative annf, Ord u) =&gt;
+<span class="lineno">   88 </span>    ImportInfo [u]
+<span class="lineno">   89 </span>    -&gt; ASTNS annf (MatchedNamespace [u]) kind
+<span class="lineno">   90 </span>    -&gt; ASTNS annf [u] kind
+<span class="lineno">   91 </span><span class="decl"><span class="nottickedoff">applyReferences importInfo =</span>
+<span class="lineno">   92 </span><span class="spaces">    </span><span class="nottickedoff">let</span>
+<span class="lineno">   93 </span><span class="spaces">        </span><span class="nottickedoff">aliases = Bimap.toMapR $ ImportInfo._aliases importInfo</span>
+<span class="lineno">   94 </span><span class="spaces">        </span><span class="nottickedoff">exposed = ImportInfo._exposed importInfo</span>
+<span class="lineno">   95 </span><span class="spaces">        </span><span class="nottickedoff">unresolvedExposingAll = ImportInfo._unresolvedExposingAll importInfo</span>
+<span class="lineno">   96 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">   97 </span><span class="spaces">        </span><span class="nottickedoff">f locals ns' identifier =</span>
+<span class="lineno">   98 </span><span class="spaces">            </span><span class="nottickedoff">case ns' of</span>
+<span class="lineno">   99 </span><span class="spaces">                </span><span class="nottickedoff">Local -&gt; []</span>
+<span class="lineno">  100 </span><span class="spaces">                </span><span class="nottickedoff">MatchedImport wasQualified ns -&gt;</span>
+<span class="lineno">  101 </span><span class="spaces">                    </span><span class="nottickedoff">let</span>
+<span class="lineno">  102 </span><span class="spaces">                        </span><span class="nottickedoff">qualify =</span>
+<span class="lineno">  103 </span><span class="spaces">                            </span><span class="nottickedoff">case wasQualified of</span>
+<span class="lineno">  104 </span><span class="spaces">                                </span><span class="nottickedoff">True -&gt;</span>
+<span class="lineno">  105 </span><span class="spaces">                                    </span><span class="nottickedoff">(Dict.lookup identifier exposed /= Just ns) -- it's not exposed</span>
+<span class="lineno">  106 </span><span class="spaces">                                    </span><span class="nottickedoff">|| Dict.member identifier locals -- something is locally defined with the same name</span>
+<span class="lineno">  107 </span><span class="spaces">                                    </span><span class="nottickedoff">|| not (Set.null unresolvedExposingAll) -- there's an import with exposing(..) and we can't be sure if something exposed by that would conflict</span>
+<span class="lineno">  108 </span><span class="spaces">                                </span><span class="nottickedoff">False -&gt;</span>
+<span class="lineno">  109 </span><span class="spaces">                                    </span><span class="nottickedoff">(Dict.lookup identifier exposed /= Just ns) -- it's not exposed</span>
+<span class="lineno">  110 </span><span class="spaces">                                    </span><span class="nottickedoff">|| Dict.member identifier locals -- something is locally defined with the same name</span>
+<span class="lineno">  111 </span><span class="spaces">                    </span><span class="nottickedoff">in</span>
+<span class="lineno">  112 </span><span class="spaces">                    </span><span class="nottickedoff">if qualify</span>
+<span class="lineno">  113 </span><span class="spaces">                      </span><span class="nottickedoff">then Maybe.fromMaybe ns $ Dict.lookup ns aliases</span>
+<span class="lineno">  114 </span><span class="spaces">                      </span><span class="nottickedoff">else [] -- This is exposed unambiguously and doesn't need to be qualified</span>
+<span class="lineno">  115 </span><span class="spaces">                </span><span class="nottickedoff">Unmatched name -&gt; name</span>
+<span class="lineno">  116 </span><span class="spaces">                </span><span class="nottickedoff">UnmatchedUnqualified _ -&gt; []</span>
+<span class="lineno">  117 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  118 </span><span class="spaces">        </span><span class="nottickedoff">defineLocal name = Dict.insert name ()</span>
+<span class="lineno">  119 </span><span class="spaces"></span><span class="nottickedoff"></span>
+<span class="lineno">  120 </span><span class="spaces">        </span><span class="nottickedoff">mapTypeRef locals (ns, u) = (f locals ns (TypeName u), u)</span>
+<span class="lineno">  121 </span><span class="spaces">        </span><span class="nottickedoff">mapCtorRef locals (ns, u) = (f locals ns (CtorName u), u)</span>
+<span class="lineno">  122 </span><span class="spaces">        </span><span class="nottickedoff">mapVarRef locals (VarRef ns l) = VarRef (f locals ns (VarName l)) l</span>
+<span class="lineno">  123 </span><span class="spaces">        </span><span class="nottickedoff">mapVarRef locals (TagRef ns u) = TagRef (f locals ns (CtorName u)) u</span>
+<span class="lineno">  124 </span><span class="spaces">        </span><span class="nottickedoff">mapVarRef _ (OpRef op) = OpRef op</span>
+<span class="lineno">  125 </span><span class="spaces">    </span><span class="nottickedoff">in</span>
+<span class="lineno">  126 </span><span class="spaces">    </span><span class="nottickedoff">topDownReferencesWithContext</span>
+<span class="lineno">  127 </span><span class="spaces">        </span><span class="nottickedoff">defineLocal</span>
+<span class="lineno">  128 </span><span class="spaces">        </span><span class="nottickedoff">mapTypeRef mapCtorRef mapVarRef</span>
+<span class="lineno">  129 </span><span class="spaces">        </span><span class="nottickedoff">mempty</span></span>
+
+</pre>
+</body>
+</html>

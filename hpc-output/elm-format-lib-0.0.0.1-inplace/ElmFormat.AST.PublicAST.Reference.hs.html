@@ -1,0 +1,113 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module ElmFormat.AST.PublicAST.Reference (Reference(..),mkReference,toRef) where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import ElmFormat.AST.PublicAST.Core
+<span class="lineno">    4 </span>
+<span class="lineno">    5 </span>
+<span class="lineno">    6 </span>data Reference
+<span class="lineno">    7 </span>    = ExternalReference
+<span class="lineno">    8 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">module_</span></span></span> :: ModuleName
+<span class="lineno">    9 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">identifier</span></span></span> :: Ref ()
+<span class="lineno">   10 </span>        }
+<span class="lineno">   11 </span>    | VariableReference
+<span class="lineno">   12 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">name</span></span></span> :: Ref ()
+<span class="lineno">   13 </span>        }
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>mkReference :: Ref [UppercaseIdentifier] -&gt; Reference
+<span class="lineno">   16 </span><span class="decl"><span class="istickedoff">mkReference = \case</span>
+<span class="lineno">   17 </span><span class="spaces">    </span><span class="istickedoff">VarRef [] var -&gt;</span>
+<span class="lineno">   18 </span><span class="spaces">        </span><span class="istickedoff">VariableReference $ VarRef () var</span>
+<span class="lineno">   19 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   20 </span><span class="spaces">    </span><span class="istickedoff">VarRef namespace var -&gt;</span>
+<span class="lineno">   21 </span><span class="spaces">        </span><span class="istickedoff">ExternalReference</span>
+<span class="lineno">   22 </span><span class="spaces">            </span><span class="istickedoff">(ModuleName namespace)</span>
+<span class="lineno">   23 </span><span class="spaces">            </span><span class="istickedoff">(VarRef () var)</span>
+<span class="lineno">   24 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   25 </span><span class="spaces">    </span><span class="istickedoff">TagRef [] tag -&gt;</span>
+<span class="lineno">   26 </span><span class="spaces">        </span><span class="istickedoff">VariableReference $ TagRef () tag</span>
+<span class="lineno">   27 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   28 </span><span class="spaces">    </span><span class="istickedoff">TagRef namespace tag -&gt;</span>
+<span class="lineno">   29 </span><span class="spaces">        </span><span class="istickedoff">ExternalReference</span>
+<span class="lineno">   30 </span><span class="spaces">            </span><span class="istickedoff">(ModuleName namespace)</span>
+<span class="lineno">   31 </span><span class="spaces">            </span><span class="istickedoff">(TagRef () tag)</span>
+<span class="lineno">   32 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   33 </span><span class="spaces">    </span><span class="istickedoff">OpRef sym -&gt;</span>
+<span class="lineno">   34 </span><span class="spaces">        </span><span class="istickedoff">VariableReference $ OpRef sym</span></span>
+<span class="lineno">   35 </span>
+<span class="lineno">   36 </span>toRef :: Reference -&gt; Ref [UppercaseIdentifier]
+<span class="lineno">   37 </span><span class="decl"><span class="istickedoff">toRef = \case</span>
+<span class="lineno">   38 </span><span class="spaces">    </span><span class="istickedoff">VariableReference (VarRef () var) -&gt;</span>
+<span class="lineno">   39 </span><span class="spaces">        </span><span class="istickedoff">VarRef [] var</span>
+<span class="lineno">   40 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   41 </span><span class="spaces">    </span><span class="istickedoff">VariableReference (TagRef () tag) -&gt;</span>
+<span class="lineno">   42 </span><span class="spaces">        </span><span class="istickedoff">TagRef [] tag</span>
+<span class="lineno">   43 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   44 </span><span class="spaces">    </span><span class="istickedoff">VariableReference (OpRef sym) -&gt;</span>
+<span class="lineno">   45 </span><span class="spaces">        </span><span class="istickedoff">OpRef sym</span>
+<span class="lineno">   46 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   47 </span><span class="spaces">    </span><span class="istickedoff">ExternalReference (ModuleName mod) (VarRef () var) -&gt;</span>
+<span class="lineno">   48 </span><span class="spaces">        </span><span class="istickedoff">VarRef mod var</span>
+<span class="lineno">   49 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   50 </span><span class="spaces">    </span><span class="istickedoff">ExternalReference (ModuleName mod) (TagRef () tag) -&gt;</span>
+<span class="lineno">   51 </span><span class="spaces">        </span><span class="istickedoff">TagRef mod tag</span>
+<span class="lineno">   52 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   53 </span><span class="spaces">    </span><span class="istickedoff">ExternalReference (ModuleName mod) (OpRef sym) -&gt;</span>
+<span class="lineno">   54 </span><span class="spaces">        </span><span class="istickedoff"><span class="nottickedoff">OpRef sym</span></span></span>
+<span class="lineno">   55 </span>
+<span class="lineno">   56 </span>
+<span class="lineno">   57 </span>instance ToJSON Reference where
+<span class="lineno">   58 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">   59 </span>    <span class="decl"><span class="istickedoff">toEncoding = pairs . toPairs</span></span>
+<span class="lineno">   60 </span>
+<span class="lineno">   61 </span>instance ToPairs Reference where
+<span class="lineno">   62 </span>    <span class="decl"><span class="istickedoff">toPairs = \case</span>
+<span class="lineno">   63 </span><span class="spaces">        </span><span class="istickedoff">ExternalReference module_ identifier -&gt;</span>
+<span class="lineno">   64 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">   65 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;ExternalReference&quot;</span>
+<span class="lineno">   66 </span><span class="spaces">                </span><span class="istickedoff">, &quot;module&quot; .= module_</span>
+<span class="lineno">   67 </span><span class="spaces">                </span><span class="istickedoff">, &quot;identifier&quot; .= identifier</span>
+<span class="lineno">   68 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">   69 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   70 </span><span class="spaces">        </span><span class="istickedoff">VariableReference name -&gt;</span>
+<span class="lineno">   71 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">   72 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;VariableReference&quot;</span>
+<span class="lineno">   73 </span><span class="spaces">                </span><span class="istickedoff">, &quot;name&quot; .= name</span>
+<span class="lineno">   74 </span><span class="spaces">                </span><span class="istickedoff">]</span></span>
+<span class="lineno">   75 </span>
+<span class="lineno">   76 </span>instance FromJSON Reference where
+<span class="lineno">   77 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;Reference&quot;</span> $ \obj -&gt; do</span>
+<span class="lineno">   78 </span><span class="spaces">        </span><span class="istickedoff">tag &lt;- obj .: &quot;tag&quot;</span>
+<span class="lineno">   79 </span><span class="spaces">        </span><span class="istickedoff">case tag of</span>
+<span class="lineno">   80 </span><span class="spaces">            </span><span class="istickedoff">&quot;VariableReference&quot; -&gt; do</span>
+<span class="lineno">   81 </span><span class="spaces">                </span><span class="istickedoff">VariableReference</span>
+<span class="lineno">   82 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;name&quot;</span>
+<span class="lineno">   83 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   84 </span><span class="spaces">            </span><span class="istickedoff">&quot;ExternalReference&quot; -&gt;</span>
+<span class="lineno">   85 </span><span class="spaces">                </span><span class="istickedoff">ExternalReference</span>
+<span class="lineno">   86 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;module&quot;</span>
+<span class="lineno">   87 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;identifier&quot;</span>
+<span class="lineno">   88 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   89 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   90 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">fail (&quot;unexpected Reference tag: &quot; &lt;&gt; tag)</span></span></span>
+
+</pre>
+</body>
+</html>

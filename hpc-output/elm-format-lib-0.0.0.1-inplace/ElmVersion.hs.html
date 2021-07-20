@@ -1,0 +1,79 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>module ElmVersion where
+<span class="lineno">    2 </span>
+<span class="lineno">    3 </span>import Prelude ()
+<span class="lineno">    4 </span>import Relude
+<span class="lineno">    5 </span>
+<span class="lineno">    6 </span>import qualified Text.Show
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>
+<span class="lineno">    9 </span>data ElmVersion
+<span class="lineno">   10 </span>  = Elm_0_16 -- TODO: remove 0_16
+<span class="lineno">   11 </span>  | Elm_0_17 -- TODO: remove 0_17
+<span class="lineno">   12 </span>  | Elm_0_18
+<span class="lineno">   13 </span>  | Elm_0_19
+<span class="lineno">   14 </span>
+<span class="lineno">   15 </span>
+<span class="lineno">   16 </span>instance Show ElmVersion where
+<span class="lineno">   17 </span>    <span class="decl"><span class="istickedoff">show Elm_0_16 = <span class="nottickedoff">&quot;0.16&quot;</span></span>
+<span class="lineno">   18 </span><span class="spaces">    </span><span class="istickedoff">show Elm_0_17 = <span class="nottickedoff">&quot;0.17&quot;</span></span>
+<span class="lineno">   19 </span><span class="spaces">    </span><span class="istickedoff">show Elm_0_18 = <span class="nottickedoff">&quot;0.18&quot;</span></span>
+<span class="lineno">   20 </span><span class="spaces">    </span><span class="istickedoff">show Elm_0_19 = &quot;0.19&quot;</span></span>
+<span class="lineno">   21 </span>
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>parse :: String -&gt; Either String ElmVersion
+<span class="lineno">   24 </span><span class="decl"><span class="istickedoff">parse versionString =</span>
+<span class="lineno">   25 </span><span class="spaces">  </span><span class="istickedoff">case versionString of</span>
+<span class="lineno">   26 </span><span class="spaces">    </span><span class="istickedoff">&quot;0.17&quot; -&gt; Right Elm_0_17</span>
+<span class="lineno">   27 </span><span class="spaces">    </span><span class="istickedoff">&quot;0.18&quot; -&gt; Right Elm_0_18</span>
+<span class="lineno">   28 </span><span class="spaces">    </span><span class="istickedoff">&quot;0.19&quot; -&gt; Right Elm_0_19</span>
+<span class="lineno">   29 </span><span class="spaces">    </span><span class="istickedoff">_ -&gt; <span class="nottickedoff">Left (&quot;Invalid Elm version \&quot;&quot; ++ versionString ++ &quot;\&quot;.  Supported versions are 0.18, 0.19&quot;)</span></span></span>
+<span class="lineno">   30 </span>
+<span class="lineno">   31 </span>
+<span class="lineno">   32 </span>syntax_0_19_disallowApostropheInVars :: ElmVersion -&gt; Bool
+<span class="lineno">   33 </span><span class="decl"><span class="istickedoff">syntax_0_19_disallowApostropheInVars elmVersion =</span>
+<span class="lineno">   34 </span><span class="spaces">    </span><span class="istickedoff">case elmVersion of</span>
+<span class="lineno">   35 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_16 -&gt; <span class="nottickedoff">False</span></span>
+<span class="lineno">   36 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_17 -&gt; False</span>
+<span class="lineno">   37 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_18 -&gt; False</span>
+<span class="lineno">   38 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_19 -&gt; True</span></span>
+<span class="lineno">   39 </span>
+<span class="lineno">   40 </span>
+<span class="lineno">   41 </span>style_0_19_stringEscape :: ElmVersion -&gt; Bool
+<span class="lineno">   42 </span><span class="decl"><span class="istickedoff">style_0_19_stringEscape elmVersion =</span>
+<span class="lineno">   43 </span><span class="spaces">    </span><span class="istickedoff">case elmVersion of</span>
+<span class="lineno">   44 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_16 -&gt; <span class="nottickedoff">False</span></span>
+<span class="lineno">   45 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_17 -&gt; False</span>
+<span class="lineno">   46 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_18 -&gt; False</span>
+<span class="lineno">   47 </span><span class="spaces">        </span><span class="istickedoff">Elm_0_19 -&gt; True</span></span>
+<span class="lineno">   48 </span>
+<span class="lineno">   49 </span>
+<span class="lineno">   50 </span>style_0_19_cannotExposeOpenListing :: ElmVersion -&gt; Bool
+<span class="lineno">   51 </span><span class="decl"><span class="nottickedoff">style_0_19_cannotExposeOpenListing elmVersion =</span>
+<span class="lineno">   52 </span><span class="spaces">    </span><span class="nottickedoff">case elmVersion of</span>
+<span class="lineno">   53 </span><span class="spaces">        </span><span class="nottickedoff">Elm_0_16 -&gt; False</span>
+<span class="lineno">   54 </span><span class="spaces">        </span><span class="nottickedoff">Elm_0_17 -&gt; False</span>
+<span class="lineno">   55 </span><span class="spaces">        </span><span class="nottickedoff">Elm_0_18 -&gt; False</span>
+<span class="lineno">   56 </span><span class="spaces">        </span><span class="nottickedoff">Elm_0_19 -&gt; True</span></span>
+
+</pre>
+</body>
+</html>

@@ -1,0 +1,770 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE DuplicateRecordFields #-}
+<span class="lineno">    2 </span>{-# LANGUAGE KindSignatures #-}
+<span class="lineno">    3 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    4 </span>{-# LANGUAGE Rank2Types #-}
+<span class="lineno">    5 </span>{-# LANGUAGE StandaloneDeriving #-}
+<span class="lineno">    6 </span>{-# LANGUAGE GADTs #-}
+<span class="lineno">    7 </span>{-# LANGUAGE PolyKinds #-}
+<span class="lineno">    8 </span>{-# LANGUAGE TypeFamilies #-}
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>module AST.V0_16 (module AST.V0_16, module ElmFormat.AST.Shared) where
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>import Data.Bifunctor
+<span class="lineno">   13 </span>import Data.Coapplicative
+<span class="lineno">   14 </span>import Data.Foldable
+<span class="lineno">   15 </span>import Data.Functor.Const
+<span class="lineno">   16 </span>import Data.Functor.Compose
+<span class="lineno">   17 </span>import qualified Data.Indexed as I
+<span class="lineno">   18 </span>import qualified Cheapskate.Types as Markdown
+<span class="lineno">   19 </span>import ElmFormat.AST.Shared
+<span class="lineno">   20 </span>import qualified Data.Maybe as Maybe
+<span class="lineno">   21 </span>import Data.Text (Text)
+<span class="lineno">   22 </span>
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>newtype ForceMultiline =
+<span class="lineno">   25 </span>    ForceMultiline Bool
+<span class="lineno">   26 </span>    deriving (<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Eq</span></span></span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   27 </span>
+<span class="lineno">   28 </span>instance Semigroup ForceMultiline where
+<span class="lineno">   29 </span>    <span class="decl"><span class="nottickedoff">(ForceMultiline a) &lt;&gt; (ForceMultiline b) = ForceMultiline (a || b)</span></span>
+<span class="lineno">   30 </span>
+<span class="lineno">   31 </span>
+<span class="lineno">   32 </span>data Comment
+<span class="lineno">   33 </span>    = BlockComment (List String)
+<span class="lineno">   34 </span>    | LineComment String
+<span class="lineno">   35 </span>    | CommentTrickOpener
+<span class="lineno">   36 </span>    | CommentTrickCloser
+<span class="lineno">   37 </span>    | CommentTrickBlock String
+<span class="lineno">   38 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="istickedoff">Ord</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   39 </span>
+<span class="lineno">   40 </span>type Comments = List Comment
+<span class="lineno">   41 </span>
+<span class="lineno">   42 </span>eolToComment :: Maybe String -&gt; Comments
+<span class="lineno">   43 </span><span class="decl"><span class="istickedoff">eolToComment eol =</span>
+<span class="lineno">   44 </span><span class="spaces">    </span><span class="istickedoff">Maybe.maybeToList (fmap LineComment eol)</span></span>
+<span class="lineno">   45 </span>
+<span class="lineno">   46 </span>
+<span class="lineno">   47 </span>data CommentType
+<span class="lineno">   48 </span>    = BeforeTerm
+<span class="lineno">   49 </span>    | AfterTerm
+<span class="lineno">   50 </span>    | Inside
+<span class="lineno">   51 </span>    | BeforeSeparator
+<span class="lineno">   52 </span>    | AfterSeparator
+<span class="lineno">   53 </span>
+<span class="lineno">   54 </span>type C1 (l1 :: CommentType) = Commented Comments
+<span class="lineno">   55 </span>type C2 (l1 :: CommentType) (l2 :: CommentType) = Commented (Comments, Comments)
+<span class="lineno">   56 </span>type C3 (l1 :: CommentType) (l2 :: CommentType) (l3 :: CommentType) = Commented (Comments, Comments, Comments)
+<span class="lineno">   57 </span>
+<span class="lineno">   58 </span>type C0Eol = Commented (Maybe String)
+<span class="lineno">   59 </span>type C1Eol (l1 :: CommentType) = Commented (Comments, Maybe String)
+<span class="lineno">   60 </span>type C2Eol (l1 :: CommentType) (l2 :: CommentType) = Commented (Comments, Comments, Maybe String)
+<span class="lineno">   61 </span>
+<span class="lineno">   62 </span>class AsCommentedList f where
+<span class="lineno">   63 </span>    type CommentsFor f :: * -&gt; *
+<span class="lineno">   64 </span>    toCommentedList :: f a -&gt; List (CommentsFor f a)
+<span class="lineno">   65 </span>    fromCommentedList :: List (CommentsFor f a) -&gt; Either Text (f a)
+<span class="lineno">   66 </span>
+<span class="lineno">   67 </span>
+<span class="lineno">   68 </span>{-| This represents a list of things separated by comments.
+<span class="lineno">   69 </span>
+<span class="lineno">   70 </span>Currently, the first item will never have leading comments.
+<span class="lineno">   71 </span>However, if Elm ever changes to allow optional leading delimiters, then
+<span class="lineno">   72 </span>comments before the first delimiter will go there.
+<span class="lineno">   73 </span>-}
+<span class="lineno">   74 </span>newtype Sequence a =
+<span class="lineno">   75 </span>    Sequence (List (C2Eol 'BeforeSeparator 'AfterSeparator a))
+<span class="lineno">   76 </span>    deriving (<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Eq</span></span></span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">   77 </span>
+<span class="lineno">   78 </span>instance Foldable Sequence where
+<span class="lineno">   79 </span>    <span class="decl"><span class="nottickedoff">foldMap f (Sequence items) = foldMap (f . extract) items</span></span>
+<span class="lineno">   80 </span>
+<span class="lineno">   81 </span>instance Semigroup (Sequence a) where
+<span class="lineno">   82 </span>    <span class="decl"><span class="nottickedoff">(Sequence left) &lt;&gt; (Sequence right) = Sequence (left &lt;&gt; right)</span></span>
+<span class="lineno">   83 </span>
+<span class="lineno">   84 </span>instance Monoid (Sequence a) where
+<span class="lineno">   85 </span>    <span class="decl"><span class="nottickedoff">mempty = Sequence []</span></span>
+<span class="lineno">   86 </span>
+<span class="lineno">   87 </span>instance AsCommentedList Sequence where
+<span class="lineno">   88 </span>    type CommentsFor Sequence = C2Eol 'BeforeSeparator 'AfterSeparator
+<span class="lineno">   89 </span>    <span class="decl"><span class="istickedoff">toCommentedList (Sequence items) = items</span></span>
+<span class="lineno">   90 </span>    <span class="decl"><span class="istickedoff">fromCommentedList = Right . Sequence</span></span>
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>
+<span class="lineno">   93 </span>{-| This represents a list of things between clear start and end delimiters.
+<span class="lineno">   94 </span>Comments can appear before and after any item, or alone if there are no items.
+<span class="lineno">   95 </span>
+<span class="lineno">   96 </span>For example:
+<span class="lineno">   97 </span>  ( {- nothing -} )
+<span class="lineno">   98 </span>  ( a, b )
+<span class="lineno">   99 </span>
+<span class="lineno">  100 </span>TODO: this should be replaced with (Sequence a, Comments)
+<span class="lineno">  101 </span>-}
+<span class="lineno">  102 </span>data ContainedCommentedList a
+<span class="lineno">  103 </span>    = Empty (C1 'Inside ())
+<span class="lineno">  104 </span>    | Items [C2 'BeforeTerm 'AfterTerm a]
+<span class="lineno">  105 </span>
+<span class="lineno">  106 </span>
+<span class="lineno">  107 </span>{-| This represents a list of things that have no clear start and end
+<span class="lineno">  108 </span>delimiters.
+<span class="lineno">  109 </span>
+<span class="lineno">  110 </span>If there is more than one item in the list, then comments can appear.
+<span class="lineno">  111 </span>Comments can appear after the first item, before the last item, and
+<span class="lineno">  112 </span>around any other item.
+<span class="lineno">  113 </span>An end-of-line comment can appear after the last item.
+<span class="lineno">  114 </span>
+<span class="lineno">  115 </span>If there is only one item in the list, an end-of-line comment can appear after the item.
+<span class="lineno">  116 </span>
+<span class="lineno">  117 </span>TODO: this should be replaced with (Sequence a)
+<span class="lineno">  118 </span>-}
+<span class="lineno">  119 </span>data ExposedCommentedList a
+<span class="lineno">  120 </span>    = Single (C0Eol a)
+<span class="lineno">  121 </span>    | Multiple (C1Eol 'AfterTerm a) [C2Eol 'BeforeTerm 'AfterTerm a] (C1Eol 'BeforeTerm a)
+<span class="lineno">  122 </span>
+<span class="lineno">  123 </span>
+<span class="lineno">  124 </span>{-| This represents a list of things that have a clear start delimiter but no
+<span class="lineno">  125 </span>clear end delimiter.
+<span class="lineno">  126 </span>There must be at least one item.
+<span class="lineno">  127 </span>Comments can appear before the last item, or around any other item.
+<span class="lineno">  128 </span>An end-of-line comment can also appear after the last item.
+<span class="lineno">  129 </span>
+<span class="lineno">  130 </span>For example:
+<span class="lineno">  131 </span>  = a
+<span class="lineno">  132 </span>  = a, b, c
+<span class="lineno">  133 </span>
+<span class="lineno">  134 </span>TODO: this should be replaced with (Sequence a)
+<span class="lineno">  135 </span>-}
+<span class="lineno">  136 </span>data OpenCommentedList a
+<span class="lineno">  137 </span>    = OpenCommentedList [C2Eol 'BeforeTerm 'AfterTerm a] (C1Eol 'BeforeTerm a)
+<span class="lineno">  138 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">  139 </span>
+<span class="lineno">  140 </span>instance Foldable OpenCommentedList where
+<span class="lineno">  141 </span>    <span class="decl"><span class="istickedoff">foldMap f (OpenCommentedList rest last) = foldMap (f . extract) rest &lt;&gt; (f . extract) last</span></span>
+<span class="lineno">  142 </span>
+<span class="lineno">  143 </span>instance AsCommentedList OpenCommentedList where
+<span class="lineno">  144 </span>    type CommentsFor OpenCommentedList = C2Eol 'BeforeTerm 'AfterTerm
+<span class="lineno">  145 </span>    <span class="decl"><span class="istickedoff">toCommentedList (OpenCommentedList rest (C (cLast, eolLast) last)) =</span>
+<span class="lineno">  146 </span><span class="spaces">        </span><span class="istickedoff">rest ++ [ C <span class="nottickedoff">(cLast, [], eolLast)</span> last ]</span></span>
+<span class="lineno">  147 </span>    <span class="decl"><span class="istickedoff">fromCommentedList list =</span>
+<span class="lineno">  148 </span><span class="spaces">        </span><span class="istickedoff">case reverse list of</span>
+<span class="lineno">  149 </span><span class="spaces">            </span><span class="istickedoff">C (cLast, cLastInvalid, eolLast) last : revRest -&gt;</span>
+<span class="lineno">  150 </span><span class="spaces">                </span><span class="istickedoff">Right $ OpenCommentedList</span>
+<span class="lineno">  151 </span><span class="spaces">                    </span><span class="istickedoff">(reverse revRest)</span>
+<span class="lineno">  152 </span><span class="spaces">                    </span><span class="istickedoff">(C (cLast ++ cLastInvalid, eolLast) last)</span>
+<span class="lineno">  153 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  154 </span><span class="spaces">            </span><span class="istickedoff">[] -&gt;</span>
+<span class="lineno">  155 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">Left &quot;AsCommentedList may not be empty&quot;</span></span></span>
+<span class="lineno">  156 </span>
+<span class="lineno">  157 </span>
+<span class="lineno">  158 </span>exposedToOpen :: Comments -&gt; ExposedCommentedList a -&gt; OpenCommentedList a
+<span class="lineno">  159 </span><span class="decl"><span class="istickedoff">exposedToOpen pre exposed =</span>
+<span class="lineno">  160 </span><span class="spaces">    </span><span class="istickedoff">case exposed of</span>
+<span class="lineno">  161 </span><span class="spaces">        </span><span class="istickedoff">Single (C eol item) -&gt;</span>
+<span class="lineno">  162 </span><span class="spaces">            </span><span class="istickedoff">OpenCommentedList [] (C (pre, eol) item)</span>
+<span class="lineno">  163 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  164 </span><span class="spaces">        </span><span class="istickedoff">Multiple (C (postFirst, eol) first') rest' lst -&gt;</span>
+<span class="lineno">  165 </span><span class="spaces">            </span><span class="istickedoff">OpenCommentedList (C (pre, postFirst, eol) first' : rest') lst</span></span>
+<span class="lineno">  166 </span>
+<span class="lineno">  167 </span>
+<span class="lineno">  168 </span>{-| Represents a delimiter-separated pair.
+<span class="lineno">  169 </span>
+<span class="lineno">  170 </span>Comments can appear after the key or before the value.
+<span class="lineno">  171 </span>
+<span class="lineno">  172 </span>For example:
+<span class="lineno">  173 </span>
+<span class="lineno">  174 </span>  key = value
+<span class="lineno">  175 </span>  key : value
+<span class="lineno">  176 </span>-}
+<span class="lineno">  177 </span>data Pair key value =
+<span class="lineno">  178 </span>    Pair
+<span class="lineno">  179 </span>        { <span class="istickedoff"><span class="decl"><span class="istickedoff">_key</span></span></span> :: C1 'AfterTerm key
+<span class="lineno">  180 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">_value</span></span></span> :: C1 'BeforeTerm value
+<span class="lineno">  181 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">forceMultiline</span></span></span> :: ForceMultiline
+<span class="lineno">  182 </span>        }
+<span class="lineno">  183 </span>    deriving (<span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">  184 </span>
+<span class="lineno">  185 </span>
+<span class="lineno">  186 </span>data Multiline
+<span class="lineno">  187 </span>    = JoinAll
+<span class="lineno">  188 </span>    | SplitAll
+<span class="lineno">  189 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">  190 </span>
+<span class="lineno">  191 </span>
+<span class="lineno">  192 </span>isMultiline :: Multiline -&gt; Bool
+<span class="lineno">  193 </span><span class="decl"><span class="istickedoff">isMultiline JoinAll = False</span>
+<span class="lineno">  194 </span><span class="spaces"></span><span class="istickedoff">isMultiline SplitAll = True</span></span>
+<span class="lineno">  195 </span>
+<span class="lineno">  196 </span>
+<span class="lineno">  197 </span>data FunctionApplicationMultiline
+<span class="lineno">  198 </span>    = FASplitFirst
+<span class="lineno">  199 </span>    | FAJoinFirst Multiline
+<span class="lineno">  200 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">  201 </span>
+<span class="lineno">  202 </span>
+<span class="lineno">  203 </span>data Assoc = L | N | R
+<span class="lineno">  204 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">  205 </span>
+<span class="lineno">  206 </span>assocToString :: Assoc -&gt; String
+<span class="lineno">  207 </span><span class="decl"><span class="nottickedoff">assocToString assoc =</span>
+<span class="lineno">  208 </span><span class="spaces">    </span><span class="nottickedoff">case assoc of</span>
+<span class="lineno">  209 </span><span class="spaces">      </span><span class="nottickedoff">L -&gt; &quot;left&quot;</span>
+<span class="lineno">  210 </span><span class="spaces">      </span><span class="nottickedoff">N -&gt; &quot;non&quot;</span>
+<span class="lineno">  211 </span><span class="spaces">      </span><span class="nottickedoff">R -&gt; &quot;right&quot;</span></span>
+<span class="lineno">  212 </span>
+<span class="lineno">  213 </span>
+<span class="lineno">  214 </span>data NameWithArgs name arg =
+<span class="lineno">  215 </span>    NameWithArgs name [C1 'BeforeTerm arg]
+<span class="lineno">  216 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">  217 </span>instance Foldable (NameWithArgs name) where
+<span class="lineno">  218 </span>    <span class="decl"><span class="nottickedoff">foldMap f (NameWithArgs _ args) = foldMap (f . extract) args</span></span>
+<span class="lineno">  219 </span>
+<span class="lineno">  220 </span>
+<span class="lineno">  221 </span>data TypeConstructor ctorRef
+<span class="lineno">  222 </span>    = NamedConstructor ctorRef
+<span class="lineno">  223 </span>    | TupleConstructor Int -- will be 2 or greater, indicating the number of elements in the tuple
+<span class="lineno">  224 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">  225 </span>
+<span class="lineno">  226 </span>
+<span class="lineno">  227 </span>data BinopsClause varRef expr =
+<span class="lineno">  228 </span>    BinopsClause Comments varRef Comments expr
+<span class="lineno">  229 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">  230 </span>
+<span class="lineno">  231 </span>instance Bifunctor BinopsClause where
+<span class="lineno">  232 </span>    <span class="decl"><span class="istickedoff">bimap fvr fe = \case</span>
+<span class="lineno">  233 </span><span class="spaces">        </span><span class="istickedoff">BinopsClause c1 vr c2 e -&gt; BinopsClause c1 (fvr vr) c2 (fe e)</span></span>
+<span class="lineno">  234 </span>
+<span class="lineno">  235 </span>
+<span class="lineno">  236 </span>data IfClause e =
+<span class="lineno">  237 </span>    IfClause (C2 'BeforeTerm 'AfterTerm e) (C2 'BeforeTerm 'AfterTerm e)
+<span class="lineno">  238 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">  239 </span>
+<span class="lineno">  240 </span>
+<span class="lineno">  241 </span>data TopLevelStructure a
+<span class="lineno">  242 </span>    = DocComment Markdown.Blocks
+<span class="lineno">  243 </span>    | BodyComment Comment
+<span class="lineno">  244 </span>    | Entry a
+<span class="lineno">  245 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff">Functor</span></span></span></span>)
+<span class="lineno">  246 </span>
+<span class="lineno">  247 </span>instance Foldable TopLevelStructure where
+<span class="lineno">  248 </span>    <span class="decl"><span class="istickedoff">foldMap _ (DocComment _) = <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  249 </span><span class="spaces">    </span><span class="istickedoff">foldMap _ (BodyComment _) = mempty</span>
+<span class="lineno">  250 </span><span class="spaces">    </span><span class="istickedoff">foldMap f (Entry a) = f a</span></span>
+<span class="lineno">  251 </span>
+<span class="lineno">  252 </span>
+<span class="lineno">  253 </span>data LocalName
+<span class="lineno">  254 </span>    = TypeName UppercaseIdentifier
+<span class="lineno">  255 </span>    | CtorName UppercaseIdentifier
+<span class="lineno">  256 </span>    | VarName LowercaseIdentifier
+<span class="lineno">  257 </span>    deriving (<span class="decl"><span class="nottickedoff">Eq</span></span>, <span class="decl"><span class="istickedoff"><span class="decl"><span class="istickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff"><span class="decl"><span class="istickedoff">Ord</span></span></span></span></span></span></span></span></span></span>, <span class="decl"><span class="nottickedoff">Show</span></span>)
+<span class="lineno">  258 </span>
+<span class="lineno">  259 </span>
+<span class="lineno">  260 </span>data NodeKind
+<span class="lineno">  261 </span>    = TopLevelNK
+<span class="lineno">  262 </span>    | CommonDeclarationNK
+<span class="lineno">  263 </span>    | TopLevelDeclarationNK
+<span class="lineno">  264 </span>    | ExpressionNK
+<span class="lineno">  265 </span>    | LetDeclarationNK
+<span class="lineno">  266 </span>    | CaseBranchNK
+<span class="lineno">  267 </span>    | PatternNK
+<span class="lineno">  268 </span>    | TypeNK
+<span class="lineno">  269 </span>
+<span class="lineno">  270 </span>
+<span class="lineno">  271 </span>data AST typeRef ctorRef varRef (getType :: NodeKind -&gt; *) (kind :: NodeKind) where
+<span class="lineno">  272 </span>
+<span class="lineno">  273 </span>    TopLevel ::
+<span class="lineno">  274 </span>        [TopLevelStructure (getType 'TopLevelDeclarationNK)]
+<span class="lineno">  275 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelNK
+<span class="lineno">  276 </span>
+<span class="lineno">  277 </span>    --
+<span class="lineno">  278 </span>    -- Declarations
+<span class="lineno">  279 </span>    --
+<span class="lineno">  280 </span>
+<span class="lineno">  281 </span>    Definition ::
+<span class="lineno">  282 </span>        getType 'PatternNK
+<span class="lineno">  283 </span>        -&gt; [C1 'BeforeTerm (getType 'PatternNK)]
+<span class="lineno">  284 </span>        -&gt; Comments
+<span class="lineno">  285 </span>        -&gt; getType 'ExpressionNK
+<span class="lineno">  286 </span>        -&gt; AST typeRef ctorRef varRef getType 'CommonDeclarationNK
+<span class="lineno">  287 </span>    TypeAnnotation ::
+<span class="lineno">  288 </span>        C1 'AfterTerm (Ref ())
+<span class="lineno">  289 </span>        -&gt; C1 'BeforeTerm (getType 'TypeNK)
+<span class="lineno">  290 </span>        -&gt; AST typeRef ctorRef varRef getType 'CommonDeclarationNK
+<span class="lineno">  291 </span>    CommonDeclaration ::
+<span class="lineno">  292 </span>        getType 'CommonDeclarationNK
+<span class="lineno">  293 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelDeclarationNK
+<span class="lineno">  294 </span>    Datatype ::
+<span class="lineno">  295 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">nameWithArgs</span></span></span> :: C2 'BeforeTerm 'AfterTerm (NameWithArgs UppercaseIdentifier LowercaseIdentifier)
+<span class="lineno">  296 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">tags</span></span></span> :: OpenCommentedList (NameWithArgs UppercaseIdentifier (getType 'TypeNK))
+<span class="lineno">  297 </span>        }
+<span class="lineno">  298 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelDeclarationNK
+<span class="lineno">  299 </span>    TypeAlias ::
+<span class="lineno">  300 </span>        Comments
+<span class="lineno">  301 </span>        -&gt; C2 'BeforeTerm 'AfterTerm (NameWithArgs UppercaseIdentifier LowercaseIdentifier)
+<span class="lineno">  302 </span>        -&gt; C1 'BeforeTerm (getType 'TypeNK)
+<span class="lineno">  303 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelDeclarationNK
+<span class="lineno">  304 </span>    PortAnnotation ::
+<span class="lineno">  305 </span>        C2 'BeforeTerm 'AfterTerm LowercaseIdentifier
+<span class="lineno">  306 </span>        -&gt; Comments
+<span class="lineno">  307 </span>        -&gt; getType 'TypeNK
+<span class="lineno">  308 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelDeclarationNK
+<span class="lineno">  309 </span>    PortDefinition_until_0_16 ::
+<span class="lineno">  310 </span>        C2 'BeforeTerm 'AfterTerm LowercaseIdentifier
+<span class="lineno">  311 </span>        -&gt; Comments
+<span class="lineno">  312 </span>        -&gt; getType 'ExpressionNK
+<span class="lineno">  313 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelDeclarationNK
+<span class="lineno">  314 </span>    Fixity_until_0_18 ::
+<span class="lineno">  315 </span>        Assoc
+<span class="lineno">  316 </span>        -&gt; Comments
+<span class="lineno">  317 </span>        -&gt; Int
+<span class="lineno">  318 </span>        -&gt; Comments
+<span class="lineno">  319 </span>        -&gt; varRef
+<span class="lineno">  320 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelDeclarationNK
+<span class="lineno">  321 </span>    Fixity ::
+<span class="lineno">  322 </span>        C1 'BeforeTerm Assoc
+<span class="lineno">  323 </span>        -&gt; C1 'BeforeTerm Int
+<span class="lineno">  324 </span>        -&gt; C2 'BeforeTerm 'AfterTerm SymbolIdentifier
+<span class="lineno">  325 </span>        -&gt; C1 'BeforeTerm LowercaseIdentifier
+<span class="lineno">  326 </span>        -&gt; AST typeRef ctorRef varRef getType 'TopLevelDeclarationNK
+<span class="lineno">  327 </span>
+<span class="lineno">  328 </span>    --
+<span class="lineno">  329 </span>    -- Expressions
+<span class="lineno">  330 </span>    --
+<span class="lineno">  331 </span>
+<span class="lineno">  332 </span>    Unit ::
+<span class="lineno">  333 </span>        Comments
+<span class="lineno">  334 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  335 </span>    Literal ::
+<span class="lineno">  336 </span>        LiteralValue
+<span class="lineno">  337 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  338 </span>    VarExpr ::
+<span class="lineno">  339 </span>        varRef
+<span class="lineno">  340 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  341 </span>
+<span class="lineno">  342 </span>    App ::
+<span class="lineno">  343 </span>        getType 'ExpressionNK
+<span class="lineno">  344 </span>        -&gt; [C1 'BeforeTerm (getType 'ExpressionNK)]
+<span class="lineno">  345 </span>        -&gt; FunctionApplicationMultiline
+<span class="lineno">  346 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  347 </span>    Unary ::
+<span class="lineno">  348 </span>        UnaryOperator
+<span class="lineno">  349 </span>        -&gt; getType 'ExpressionNK
+<span class="lineno">  350 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  351 </span>    Binops ::
+<span class="lineno">  352 </span>        getType 'ExpressionNK
+<span class="lineno">  353 </span>        -&gt; List (BinopsClause varRef (getType 'ExpressionNK)) -- Non-empty
+<span class="lineno">  354 </span>        -&gt; Bool
+<span class="lineno">  355 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  356 </span>    Parens ::
+<span class="lineno">  357 </span>        C2 'BeforeTerm 'AfterTerm (getType 'ExpressionNK)
+<span class="lineno">  358 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  359 </span>
+<span class="lineno">  360 </span>    ExplicitList ::
+<span class="lineno">  361 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">terms</span></span></span> :: Sequence (getType 'ExpressionNK)
+<span class="lineno">  362 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">trailingComments_el</span></span></span> :: Comments
+<span class="lineno">  363 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">forceMultiline_el</span></span></span> :: ForceMultiline
+<span class="lineno">  364 </span>        }
+<span class="lineno">  365 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  366 </span>    Range ::
+<span class="lineno">  367 </span>        C2 'BeforeTerm 'AfterTerm (getType 'ExpressionNK)
+<span class="lineno">  368 </span>        -&gt; C2 'BeforeTerm 'AfterTerm (getType 'ExpressionNK)
+<span class="lineno">  369 </span>        -&gt; Bool
+<span class="lineno">  370 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  371 </span>
+<span class="lineno">  372 </span>    Tuple ::
+<span class="lineno">  373 </span>        [C2 'BeforeTerm 'AfterTerm (getType 'ExpressionNK)]
+<span class="lineno">  374 </span>        -&gt; Bool
+<span class="lineno">  375 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  376 </span>    TupleFunction ::
+<span class="lineno">  377 </span>        Int -- will be 2 or greater, indicating the number of elements in the tuple
+<span class="lineno">  378 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  379 </span>
+<span class="lineno">  380 </span>    Record ::
+<span class="lineno">  381 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">base_r</span></span></span> :: Maybe (C2 'BeforeTerm 'AfterTerm LowercaseIdentifier)
+<span class="lineno">  382 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">fields_r</span></span></span> :: Sequence (Pair LowercaseIdentifier (getType 'ExpressionNK))
+<span class="lineno">  383 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">trailingComments_r</span></span></span> :: Comments
+<span class="lineno">  384 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">forceMultiline_r</span></span></span> :: ForceMultiline
+<span class="lineno">  385 </span>        }
+<span class="lineno">  386 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  387 </span>    Access ::
+<span class="lineno">  388 </span>        getType 'ExpressionNK
+<span class="lineno">  389 </span>        -&gt; LowercaseIdentifier
+<span class="lineno">  390 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  391 </span>    AccessFunction ::
+<span class="lineno">  392 </span>        LowercaseIdentifier
+<span class="lineno">  393 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  394 </span>
+<span class="lineno">  395 </span>    Lambda ::
+<span class="lineno">  396 </span>        [C1 'BeforeTerm (getType 'PatternNK)]
+<span class="lineno">  397 </span>        -&gt; Comments
+<span class="lineno">  398 </span>        -&gt; getType 'ExpressionNK
+<span class="lineno">  399 </span>        -&gt; Bool
+<span class="lineno">  400 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  401 </span>    If ::
+<span class="lineno">  402 </span>        IfClause (getType 'ExpressionNK)
+<span class="lineno">  403 </span>        -&gt; [C1 'BeforeTerm (IfClause (getType 'ExpressionNK))]
+<span class="lineno">  404 </span>        -&gt; C1 'BeforeTerm (getType 'ExpressionNK)
+<span class="lineno">  405 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  406 </span>    Let ::
+<span class="lineno">  407 </span>        [getType 'LetDeclarationNK]
+<span class="lineno">  408 </span>        -&gt; Comments
+<span class="lineno">  409 </span>        -&gt; getType 'ExpressionNK
+<span class="lineno">  410 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  411 </span>    LetCommonDeclaration ::
+<span class="lineno">  412 </span>        getType 'CommonDeclarationNK
+<span class="lineno">  413 </span>        -&gt; AST typeRef ctorRef varRef getType 'LetDeclarationNK
+<span class="lineno">  414 </span>    LetComment ::
+<span class="lineno">  415 </span>        Comment
+<span class="lineno">  416 </span>        -&gt; AST typeRef ctorRef varRef getType 'LetDeclarationNK
+<span class="lineno">  417 </span>    Case ::
+<span class="lineno">  418 </span>        (C2 'BeforeTerm 'AfterTerm (getType 'ExpressionNK), Bool)
+<span class="lineno">  419 </span>        -&gt; [getType 'CaseBranchNK]
+<span class="lineno">  420 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  421 </span>    CaseBranch ::
+<span class="lineno">  422 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">beforePattern</span></span></span> :: Comments
+<span class="lineno">  423 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">beforeArrow</span></span></span> :: Comments
+<span class="lineno">  424 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">afterArrow</span></span></span> :: Comments
+<span class="lineno">  425 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">pattern</span></span></span> :: getType 'PatternNK
+<span class="lineno">  426 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">body</span></span></span> :: getType 'ExpressionNK
+<span class="lineno">  427 </span>        }
+<span class="lineno">  428 </span>        -&gt; AST typeRef ctorRef varRef getType 'CaseBranchNK
+<span class="lineno">  429 </span>
+<span class="lineno">  430 </span>    -- for type checking and code gen only
+<span class="lineno">  431 </span>    GLShader ::
+<span class="lineno">  432 </span>        String
+<span class="lineno">  433 </span>        -&gt; AST typeRef ctorRef varRef getType 'ExpressionNK
+<span class="lineno">  434 </span>
+<span class="lineno">  435 </span>
+<span class="lineno">  436 </span>    --
+<span class="lineno">  437 </span>    -- Patterns
+<span class="lineno">  438 </span>    --
+<span class="lineno">  439 </span>
+<span class="lineno">  440 </span>    Anything ::
+<span class="lineno">  441 </span>        AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  442 </span>    UnitPattern ::
+<span class="lineno">  443 </span>        Comments
+<span class="lineno">  444 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  445 </span>    LiteralPattern ::
+<span class="lineno">  446 </span>        LiteralValue
+<span class="lineno">  447 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  448 </span>    VarPattern ::
+<span class="lineno">  449 </span>        LowercaseIdentifier
+<span class="lineno">  450 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  451 </span>    OpPattern ::
+<span class="lineno">  452 </span>        SymbolIdentifier
+<span class="lineno">  453 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  454 </span>    DataPattern ::
+<span class="lineno">  455 </span>        ctorRef
+<span class="lineno">  456 </span>        -&gt; [C1 'BeforeTerm (getType 'PatternNK)]
+<span class="lineno">  457 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  458 </span>    PatternParens ::
+<span class="lineno">  459 </span>        C2 'BeforeTerm 'AfterTerm (getType 'PatternNK)
+<span class="lineno">  460 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  461 </span>    TuplePattern ::
+<span class="lineno">  462 </span>        [C2 'BeforeTerm 'AfterTerm (getType 'PatternNK)]
+<span class="lineno">  463 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  464 </span>    EmptyListPattern ::
+<span class="lineno">  465 </span>        Comments
+<span class="lineno">  466 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  467 </span>    ListPattern ::
+<span class="lineno">  468 </span>        [C2 'BeforeTerm 'AfterTerm (getType 'PatternNK)]
+<span class="lineno">  469 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  470 </span>    ConsPattern ::
+<span class="lineno">  471 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">first_cp</span></span></span> :: C0Eol (getType 'PatternNK)
+<span class="lineno">  472 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">rest_cp</span></span></span> :: Sequence (getType 'PatternNK)
+<span class="lineno">  473 </span>        }
+<span class="lineno">  474 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  475 </span>    EmptyRecordPattern ::
+<span class="lineno">  476 </span>        Comments
+<span class="lineno">  477 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  478 </span>    RecordPattern ::
+<span class="lineno">  479 </span>        [C2 'BeforeTerm 'AfterTerm LowercaseIdentifier]
+<span class="lineno">  480 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  481 </span>    Alias ::
+<span class="lineno">  482 </span>        C1 'AfterTerm (getType 'PatternNK)
+<span class="lineno">  483 </span>        -&gt; C1 'BeforeTerm LowercaseIdentifier
+<span class="lineno">  484 </span>        -&gt; AST typeRef ctorRef varRef getType 'PatternNK
+<span class="lineno">  485 </span>
+<span class="lineno">  486 </span>
+<span class="lineno">  487 </span>    --
+<span class="lineno">  488 </span>    -- Types
+<span class="lineno">  489 </span>    --
+<span class="lineno">  490 </span>
+<span class="lineno">  491 </span>    UnitType ::
+<span class="lineno">  492 </span>        Comments
+<span class="lineno">  493 </span>        -&gt; AST typeRef ctorRef varRef getType 'TypeNK
+<span class="lineno">  494 </span>    TypeVariable ::
+<span class="lineno">  495 </span>        LowercaseIdentifier
+<span class="lineno">  496 </span>        -&gt; AST typeRef ctorRef varRef getType 'TypeNK
+<span class="lineno">  497 </span>    TypeConstruction ::
+<span class="lineno">  498 </span>        TypeConstructor typeRef
+<span class="lineno">  499 </span>        -&gt; [C1 'BeforeTerm (getType 'TypeNK)]
+<span class="lineno">  500 </span>        -&gt; ForceMultiline
+<span class="lineno">  501 </span>        -&gt; AST typeRef ctorRef varRef getType 'TypeNK
+<span class="lineno">  502 </span>    TypeParens ::
+<span class="lineno">  503 </span>        C2 'BeforeTerm 'AfterTerm (getType 'TypeNK)
+<span class="lineno">  504 </span>        -&gt; AST typeRef ctorRef varRef getType 'TypeNK
+<span class="lineno">  505 </span>    TupleType ::
+<span class="lineno">  506 </span>        [C2Eol 'BeforeTerm 'AfterTerm (getType 'TypeNK)]
+<span class="lineno">  507 </span>        -&gt; ForceMultiline
+<span class="lineno">  508 </span>        -&gt; AST typeRef ctorRef varRef getType 'TypeNK
+<span class="lineno">  509 </span>    RecordType ::
+<span class="lineno">  510 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">base_rt</span></span></span> :: Maybe (C2 'BeforeTerm 'AfterTerm LowercaseIdentifier)
+<span class="lineno">  511 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">fields_rt</span></span></span> :: Sequence (Pair LowercaseIdentifier (getType 'TypeNK))
+<span class="lineno">  512 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">trailingComments_rt</span></span></span> :: Comments
+<span class="lineno">  513 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">forceMultiline_rt</span></span></span> :: ForceMultiline
+<span class="lineno">  514 </span>        }
+<span class="lineno">  515 </span>        -&gt; AST typeRef ctorRef varRef getType 'TypeNK
+<span class="lineno">  516 </span>    FunctionType ::
+<span class="lineno">  517 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">first_ft</span></span></span> :: C0Eol (getType 'TypeNK)
+<span class="lineno">  518 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">rest_ft</span></span></span> :: Sequence (getType 'TypeNK)
+<span class="lineno">  519 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">forceMultiline_ft</span></span></span> :: ForceMultiline
+<span class="lineno">  520 </span>        }
+<span class="lineno">  521 </span>        -&gt; AST typeRef ctorRef varRef getType 'TypeNK
+<span class="lineno">  522 </span>
+<span class="lineno">  523 </span><span class="decl"><span class="nottickedoff">deriving instance</span>
+<span class="lineno">  524 </span><span class="spaces">    </span><span class="nottickedoff">( Eq typeRef, Eq ctorRef, Eq varRef</span>
+<span class="lineno">  525 </span><span class="spaces">    </span><span class="nottickedoff">, Eq (getType 'CommonDeclarationNK)</span>
+<span class="lineno">  526 </span><span class="spaces">    </span><span class="nottickedoff">, Eq (getType 'TopLevelDeclarationNK)</span>
+<span class="lineno">  527 </span><span class="spaces">    </span><span class="nottickedoff">, Eq (getType 'ExpressionNK)</span>
+<span class="lineno">  528 </span><span class="spaces">    </span><span class="nottickedoff">, Eq (getType 'LetDeclarationNK)</span>
+<span class="lineno">  529 </span><span class="spaces">    </span><span class="nottickedoff">, Eq (getType 'CaseBranchNK)</span>
+<span class="lineno">  530 </span><span class="spaces">    </span><span class="nottickedoff">, Eq (getType 'PatternNK)</span>
+<span class="lineno">  531 </span><span class="spaces">    </span><span class="nottickedoff">, Eq (getType 'TypeNK)</span>
+<span class="lineno">  532 </span><span class="spaces">    </span><span class="nottickedoff">) =&gt;</span>
+<span class="lineno">  533 </span><span class="spaces">    </span><span class="nottickedoff">Eq (AST typeRef ctorRef varRef getType kind)</span></span>
+<span class="lineno">  534 </span><span class="decl"><span class="nottickedoff">deriving instance</span>
+<span class="lineno">  535 </span><span class="spaces">    </span><span class="nottickedoff">( Show typeRef, Show ctorRef, Show varRef</span>
+<span class="lineno">  536 </span><span class="spaces">    </span><span class="nottickedoff">, Show (getType 'CommonDeclarationNK)</span>
+<span class="lineno">  537 </span><span class="spaces">    </span><span class="nottickedoff">, Show (getType 'TopLevelDeclarationNK)</span>
+<span class="lineno">  538 </span><span class="spaces">    </span><span class="nottickedoff">, Show (getType 'ExpressionNK)</span>
+<span class="lineno">  539 </span><span class="spaces">    </span><span class="nottickedoff">, Show (getType 'LetDeclarationNK)</span>
+<span class="lineno">  540 </span><span class="spaces">    </span><span class="nottickedoff">, Show (getType 'CaseBranchNK)</span>
+<span class="lineno">  541 </span><span class="spaces">    </span><span class="nottickedoff">, Show (getType 'PatternNK)</span>
+<span class="lineno">  542 </span><span class="spaces">    </span><span class="nottickedoff">, Show (getType 'TypeNK)</span>
+<span class="lineno">  543 </span><span class="spaces">    </span><span class="nottickedoff">) =&gt;</span>
+<span class="lineno">  544 </span><span class="spaces">    </span><span class="nottickedoff">Show (AST typeRef ctorRef varRef getType kind)</span></span>
+<span class="lineno">  545 </span>
+<span class="lineno">  546 </span>
+<span class="lineno">  547 </span>mapAll ::
+<span class="lineno">  548 </span>    (typeRef1 -&gt; typeRef2) -&gt; (ctorRef1 -&gt; ctorRef2) -&gt; (varRef1 -&gt; varRef2)
+<span class="lineno">  549 </span>    -&gt; (forall kind. getType1 kind -&gt; getType2 kind)
+<span class="lineno">  550 </span>    -&gt; (forall kind.
+<span class="lineno">  551 </span>        AST typeRef1 ctorRef1 varRef1 getType1 kind
+<span class="lineno">  552 </span>        -&gt; AST typeRef2 ctorRef2 varRef2 getType2 kind
+<span class="lineno">  553 </span>        )
+<span class="lineno">  554 </span><span class="decl"><span class="istickedoff">mapAll ftyp fctor fvar fast = \case</span>
+<span class="lineno">  555 </span><span class="spaces">    </span><span class="istickedoff">TopLevel tls -&gt; TopLevel (fmap (fmap fast) tls)</span>
+<span class="lineno">  556 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  557 </span><span class="spaces">    </span><span class="istickedoff">-- Declaration</span>
+<span class="lineno">  558 </span><span class="spaces">    </span><span class="istickedoff">Definition name args c e -&gt; Definition (fast name) (fmap (fmap fast) args) c (fast e)</span>
+<span class="lineno">  559 </span><span class="spaces">    </span><span class="istickedoff">TypeAnnotation name t -&gt; TypeAnnotation name (fmap fast t)</span>
+<span class="lineno">  560 </span><span class="spaces">    </span><span class="istickedoff">CommonDeclaration d -&gt; CommonDeclaration (fast d)</span>
+<span class="lineno">  561 </span><span class="spaces">    </span><span class="istickedoff">Datatype nameWithArgs ctors -&gt; Datatype nameWithArgs (fmap (fmap fast) ctors)</span>
+<span class="lineno">  562 </span><span class="spaces">    </span><span class="istickedoff">TypeAlias c nameWithArgs t -&gt; TypeAlias c nameWithArgs (fmap fast t)</span>
+<span class="lineno">  563 </span><span class="spaces">    </span><span class="istickedoff">PortAnnotation name c t -&gt; PortAnnotation name c (fast t)</span>
+<span class="lineno">  564 </span><span class="spaces">    </span><span class="istickedoff">PortDefinition_until_0_16 name c e -&gt; PortDefinition_until_0_16 name c (fast e)</span>
+<span class="lineno">  565 </span><span class="spaces">    </span><span class="istickedoff">Fixity_until_0_18 a c n c' name -&gt; Fixity_until_0_18 a c n c' (fvar name)</span>
+<span class="lineno">  566 </span><span class="spaces">    </span><span class="istickedoff">Fixity a n op name -&gt; Fixity a n op name</span>
+<span class="lineno">  567 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  568 </span><span class="spaces">    </span><span class="istickedoff">-- Expressions</span>
+<span class="lineno">  569 </span><span class="spaces">    </span><span class="istickedoff">Unit c -&gt; Unit c</span>
+<span class="lineno">  570 </span><span class="spaces">    </span><span class="istickedoff">Literal l -&gt; Literal l</span>
+<span class="lineno">  571 </span><span class="spaces">    </span><span class="istickedoff">VarExpr var -&gt; VarExpr (fvar var)</span>
+<span class="lineno">  572 </span><span class="spaces">    </span><span class="istickedoff">App first rest ml -&gt; App (fast first) (fmap (fmap fast) rest) ml</span>
+<span class="lineno">  573 </span><span class="spaces">    </span><span class="istickedoff">Unary op e -&gt; Unary op (fast e)</span>
+<span class="lineno">  574 </span><span class="spaces">    </span><span class="istickedoff">Binops first ops ml -&gt; Binops (fast first) (fmap (bimap fvar fast) ops) ml</span>
+<span class="lineno">  575 </span><span class="spaces">    </span><span class="istickedoff">Parens e -&gt; Parens (fmap fast e)</span>
+<span class="lineno">  576 </span><span class="spaces">    </span><span class="istickedoff">ExplicitList terms c ml -&gt; ExplicitList (fmap fast terms) c ml</span>
+<span class="lineno">  577 </span><span class="spaces">    </span><span class="istickedoff">Range left right ml -&gt; Range (fmap fast left) (fmap fast right) ml</span>
+<span class="lineno">  578 </span><span class="spaces">    </span><span class="istickedoff">Tuple terms ml -&gt; Tuple (fmap (fmap fast) terms) ml</span>
+<span class="lineno">  579 </span><span class="spaces">    </span><span class="istickedoff">TupleFunction n -&gt; TupleFunction n</span>
+<span class="lineno">  580 </span><span class="spaces">    </span><span class="istickedoff">Record base fields c ml -&gt; Record base (fmap (fmap fast) fields) c ml</span>
+<span class="lineno">  581 </span><span class="spaces">    </span><span class="istickedoff">Access e field -&gt; Access (fast e) field</span>
+<span class="lineno">  582 </span><span class="spaces">    </span><span class="istickedoff">AccessFunction field -&gt; AccessFunction field</span>
+<span class="lineno">  583 </span><span class="spaces">    </span><span class="istickedoff">Lambda args c e ml -&gt; Lambda (fmap (fmap fast) args) c (fast e) ml</span>
+<span class="lineno">  584 </span><span class="spaces">    </span><span class="istickedoff">If cond elsifs els -&gt; If (fmap fast cond) (fmap (fmap $ fmap fast) elsifs) (fmap fast els)</span>
+<span class="lineno">  585 </span><span class="spaces">    </span><span class="istickedoff">Let decls c e -&gt; Let (fmap fast decls) c (fast e)</span>
+<span class="lineno">  586 </span><span class="spaces">    </span><span class="istickedoff">LetCommonDeclaration d -&gt; LetCommonDeclaration (fast d)</span>
+<span class="lineno">  587 </span><span class="spaces">    </span><span class="istickedoff">LetComment c -&gt; LetComment c</span>
+<span class="lineno">  588 </span><span class="spaces">    </span><span class="istickedoff">Case (cond, ml) branches -&gt; Case (fmap fast cond, ml) (fmap fast branches)</span>
+<span class="lineno">  589 </span><span class="spaces">    </span><span class="istickedoff">CaseBranch c1 c2 c3 p e -&gt; CaseBranch c1 c2 c3 (fast p) (fast e)</span>
+<span class="lineno">  590 </span><span class="spaces">    </span><span class="istickedoff">GLShader s -&gt; GLShader s</span>
+<span class="lineno">  591 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  592 </span><span class="spaces">    </span><span class="istickedoff">-- Patterns</span>
+<span class="lineno">  593 </span><span class="spaces">    </span><span class="istickedoff">Anything -&gt; Anything</span>
+<span class="lineno">  594 </span><span class="spaces">    </span><span class="istickedoff">UnitPattern c -&gt; UnitPattern c</span>
+<span class="lineno">  595 </span><span class="spaces">    </span><span class="istickedoff">LiteralPattern l -&gt; LiteralPattern l</span>
+<span class="lineno">  596 </span><span class="spaces">    </span><span class="istickedoff">VarPattern l -&gt; VarPattern l</span>
+<span class="lineno">  597 </span><span class="spaces">    </span><span class="istickedoff">OpPattern s -&gt; OpPattern s</span>
+<span class="lineno">  598 </span><span class="spaces">    </span><span class="istickedoff">DataPattern ctor pats -&gt; DataPattern (fctor ctor) (fmap (fmap fast) pats)</span>
+<span class="lineno">  599 </span><span class="spaces">    </span><span class="istickedoff">PatternParens pat -&gt; PatternParens (fmap fast pat)</span>
+<span class="lineno">  600 </span><span class="spaces">    </span><span class="istickedoff">TuplePattern pats -&gt; TuplePattern (fmap (fmap fast) pats)</span>
+<span class="lineno">  601 </span><span class="spaces">    </span><span class="istickedoff">EmptyListPattern c -&gt; EmptyListPattern c</span>
+<span class="lineno">  602 </span><span class="spaces">    </span><span class="istickedoff">ListPattern pats -&gt; ListPattern (fmap (fmap fast) pats)</span>
+<span class="lineno">  603 </span><span class="spaces">    </span><span class="istickedoff">ConsPattern first rest -&gt; ConsPattern (fmap fast first) (fmap fast rest)</span>
+<span class="lineno">  604 </span><span class="spaces">    </span><span class="istickedoff">EmptyRecordPattern c -&gt; EmptyRecordPattern c</span>
+<span class="lineno">  605 </span><span class="spaces">    </span><span class="istickedoff">RecordPattern fields -&gt; RecordPattern fields</span>
+<span class="lineno">  606 </span><span class="spaces">    </span><span class="istickedoff">Alias pat name -&gt; Alias (fmap fast pat) name</span>
+<span class="lineno">  607 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  608 </span><span class="spaces">    </span><span class="istickedoff">-- Types</span>
+<span class="lineno">  609 </span><span class="spaces">    </span><span class="istickedoff">UnitType c -&gt; UnitType c</span>
+<span class="lineno">  610 </span><span class="spaces">    </span><span class="istickedoff">TypeVariable name -&gt; TypeVariable name</span>
+<span class="lineno">  611 </span><span class="spaces">    </span><span class="istickedoff">TypeConstruction name args forceMultiline -&gt; TypeConstruction (fmap ftyp name) (fmap (fmap fast) args) forceMultiline</span>
+<span class="lineno">  612 </span><span class="spaces">    </span><span class="istickedoff">TypeParens typ -&gt; TypeParens (fmap fast typ)</span>
+<span class="lineno">  613 </span><span class="spaces">    </span><span class="istickedoff">TupleType typs forceMultiline -&gt; TupleType (fmap (fmap fast) typs) forceMultiline</span>
+<span class="lineno">  614 </span><span class="spaces">    </span><span class="istickedoff">RecordType base fields c ml -&gt; RecordType base (fmap (fmap fast) fields) c ml</span>
+<span class="lineno">  615 </span><span class="spaces">    </span><span class="istickedoff">FunctionType first rest ml -&gt; FunctionType (fmap fast first) (fmap fast rest) ml</span></span>
+<span class="lineno">  616 </span>
+<span class="lineno">  617 </span>
+<span class="lineno">  618 </span>instance I.IFunctor (AST typeRef ctorRef varRef) where
+<span class="lineno">  619 </span>    -- TODO: it's probably worth making an optimized version of this
+<span class="lineno">  620 </span>    <span class="decl"><span class="istickedoff">imap fast = mapAll id id id fast</span></span>
+<span class="lineno">  621 </span>
+<span class="lineno">  622 </span>
+<span class="lineno">  623 </span>
+<span class="lineno">  624 </span>--
+<span class="lineno">  625 </span>-- Recursion schemes
+<span class="lineno">  626 </span>--
+<span class="lineno">  627 </span>
+<span class="lineno">  628 </span>
+<span class="lineno">  629 </span>topDownReferencesWithContext ::
+<span class="lineno">  630 </span>    forall
+<span class="lineno">  631 </span>        context ns
+<span class="lineno">  632 </span>        typeRef2 ctorRef2 varRef2
+<span class="lineno">  633 </span>        ann kind.
+<span class="lineno">  634 </span>    Functor ann =&gt;
+<span class="lineno">  635 </span>    Coapplicative ann =&gt;
+<span class="lineno">  636 </span>    (LocalName -&gt; context -&gt; context) -- TODO: since the caller typically passes a function that builds a Map or Set, this could be optimized by taking `List (LocalName)` instead of one at a time
+<span class="lineno">  637 </span>    -&gt; (context -&gt; (ns, UppercaseIdentifier) -&gt; typeRef2)
+<span class="lineno">  638 </span>    -&gt; (context -&gt; (ns, UppercaseIdentifier) -&gt; ctorRef2)
+<span class="lineno">  639 </span>    -&gt; (context -&gt; (Ref ns) -&gt; varRef2)
+<span class="lineno">  640 </span>    -&gt; context
+<span class="lineno">  641 </span>    -&gt; I.Fix ann (AST (ns, UppercaseIdentifier) (ns, UppercaseIdentifier) (Ref ns)) kind
+<span class="lineno">  642 </span>    -&gt; I.Fix ann (AST typeRef2 ctorRef2 varRef2) kind
+<span class="lineno">  643 </span><span class="decl"><span class="istickedoff">topDownReferencesWithContext defineLocal fType fCtor fVar initialContext initialAst =</span>
+<span class="lineno">  644 </span><span class="spaces">    </span><span class="istickedoff">let</span>
+<span class="lineno">  645 </span><span class="spaces">        </span><span class="istickedoff">namesFromPattern' ::</span>
+<span class="lineno">  646 </span><span class="spaces">            </span><span class="istickedoff">forall a b c kind'. -- We actually only care about PatternNK' here</span>
+<span class="lineno">  647 </span><span class="spaces">            </span><span class="istickedoff">AST a b c (Const [LocalName]) kind'</span>
+<span class="lineno">  648 </span><span class="spaces">            </span><span class="istickedoff">-&gt; Const [LocalName] kind'</span>
+<span class="lineno">  649 </span><span class="spaces">        </span><span class="istickedoff">namesFromPattern' = \case</span>
+<span class="lineno">  650 </span><span class="spaces">            </span><span class="istickedoff">Anything -&gt; mempty</span>
+<span class="lineno">  651 </span><span class="spaces">            </span><span class="istickedoff">UnitPattern _ -&gt; <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  652 </span><span class="spaces">            </span><span class="istickedoff">LiteralPattern _ -&gt; <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  653 </span><span class="spaces">            </span><span class="istickedoff">VarPattern l -&gt; Const $ pure $ VarName l</span>
+<span class="lineno">  654 </span><span class="spaces">            </span><span class="istickedoff">OpPattern _ -&gt; <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  655 </span><span class="spaces">            </span><span class="istickedoff">DataPattern _ args -&gt; foldMap extract args</span>
+<span class="lineno">  656 </span><span class="spaces">            </span><span class="istickedoff">PatternParens p -&gt; <span class="nottickedoff">extract p</span></span>
+<span class="lineno">  657 </span><span class="spaces">            </span><span class="istickedoff">TuplePattern ps -&gt; <span class="nottickedoff">foldMap extract ps</span></span>
+<span class="lineno">  658 </span><span class="spaces">            </span><span class="istickedoff">EmptyListPattern _ -&gt; <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  659 </span><span class="spaces">            </span><span class="istickedoff">ListPattern ps -&gt; <span class="nottickedoff">foldMap extract ps</span></span>
+<span class="lineno">  660 </span><span class="spaces">            </span><span class="istickedoff">ConsPattern p ps -&gt; <span class="nottickedoff">extract p &lt;&gt; fold ps</span></span>
+<span class="lineno">  661 </span><span class="spaces">            </span><span class="istickedoff">EmptyRecordPattern _ -&gt; <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  662 </span><span class="spaces">            </span><span class="istickedoff">RecordPattern ps -&gt; <span class="nottickedoff">Const $ fmap (VarName . extract) ps</span></span>
+<span class="lineno">  663 </span><span class="spaces">            </span><span class="istickedoff">Alias p name -&gt; extract p &lt;&gt; Const (pure $ VarName $ extract name)</span>
+<span class="lineno">  664 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  665 </span><span class="spaces">        </span><span class="istickedoff">namesFromPattern ::</span>
+<span class="lineno">  666 </span><span class="spaces">            </span><span class="istickedoff">Coapplicative ann' =&gt;</span>
+<span class="lineno">  667 </span><span class="spaces">            </span><span class="istickedoff">I.Fix ann' (AST a b c) kind'</span>
+<span class="lineno">  668 </span><span class="spaces">            </span><span class="istickedoff">-&gt; [LocalName]</span>
+<span class="lineno">  669 </span><span class="spaces">        </span><span class="istickedoff">namesFromPattern =</span>
+<span class="lineno">  670 </span><span class="spaces">            </span><span class="istickedoff">getConst . I.cata (namesFromPattern' . extract)</span>
+<span class="lineno">  671 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  672 </span><span class="spaces">        </span><span class="istickedoff">namesFrom ::</span>
+<span class="lineno">  673 </span><span class="spaces">            </span><span class="istickedoff">Coapplicative ann' =&gt;</span>
+<span class="lineno">  674 </span><span class="spaces">            </span><span class="istickedoff">I.Fix ann' (AST a b c) kind'</span>
+<span class="lineno">  675 </span><span class="spaces">            </span><span class="istickedoff">-&gt; [LocalName]</span>
+<span class="lineno">  676 </span><span class="spaces">        </span><span class="istickedoff">namesFrom decl =</span>
+<span class="lineno">  677 </span><span class="spaces">            </span><span class="istickedoff">case extract $ I.unFix decl of</span>
+<span class="lineno">  678 </span><span class="spaces">                </span><span class="istickedoff">Definition p _ _ _ -&gt; namesFromPattern p</span>
+<span class="lineno">  679 </span><span class="spaces">                </span><span class="istickedoff">TypeAnnotation _ _ -&gt; mempty</span>
+<span class="lineno">  680 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  681 </span><span class="spaces">                </span><span class="istickedoff">CommonDeclaration d -&gt; namesFrom d</span>
+<span class="lineno">  682 </span><span class="spaces">                </span><span class="istickedoff">Datatype (C _ (NameWithArgs name _)) tags -&gt;</span>
+<span class="lineno">  683 </span><span class="spaces">                    </span><span class="istickedoff">TypeName name</span>
+<span class="lineno">  684 </span><span class="spaces">                    </span><span class="istickedoff">: fmap (\(NameWithArgs name _) -&gt; CtorName name) (toList tags)</span>
+<span class="lineno">  685 </span><span class="spaces">                </span><span class="istickedoff">TypeAlias _ (C _ (NameWithArgs name _)) _ -&gt; [TypeName name]</span>
+<span class="lineno">  686 </span><span class="spaces">                </span><span class="istickedoff">PortAnnotation (C _ name) _ _ -&gt; <span class="nottickedoff">[VarName name]</span></span>
+<span class="lineno">  687 </span><span class="spaces">                </span><span class="istickedoff">PortDefinition_until_0_16 (C _ name) _ _ -&gt; <span class="nottickedoff">[VarName name]</span></span>
+<span class="lineno">  688 </span><span class="spaces">                </span><span class="istickedoff">Fixity_until_0_18 _ _ _ _ _ -&gt; <span class="nottickedoff">[]</span></span>
+<span class="lineno">  689 </span><span class="spaces">                </span><span class="istickedoff">Fixity _ _ _ _ -&gt; <span class="nottickedoff">[]</span></span>
+<span class="lineno">  690 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  691 </span><span class="spaces">                </span><span class="istickedoff">LetCommonDeclaration d -&gt; namesFrom d</span>
+<span class="lineno">  692 </span><span class="spaces">                </span><span class="istickedoff">LetComment _ -&gt; <span class="nottickedoff">mempty</span></span>
+<span class="lineno">  693 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  694 </span><span class="spaces">        </span><span class="istickedoff">newDefinitionsAtNode ::</span>
+<span class="lineno">  695 </span><span class="spaces">            </span><span class="istickedoff">forall kind'.</span>
+<span class="lineno">  696 </span><span class="spaces">            </span><span class="istickedoff">AST (ns, UppercaseIdentifier) (ns, UppercaseIdentifier) (Ref ns)</span>
+<span class="lineno">  697 </span><span class="spaces">                </span><span class="istickedoff">(I.Fix ann (AST (ns, UppercaseIdentifier) (ns, UppercaseIdentifier) (Ref ns)))</span>
+<span class="lineno">  698 </span><span class="spaces">                </span><span class="istickedoff">kind'</span>
+<span class="lineno">  699 </span><span class="spaces">            </span><span class="istickedoff">-&gt; [LocalName]</span>
+<span class="lineno">  700 </span><span class="spaces">        </span><span class="istickedoff">newDefinitionsAtNode node =</span>
+<span class="lineno">  701 </span><span class="spaces">            </span><span class="istickedoff">case node of</span>
+<span class="lineno">  702 </span><span class="spaces">                </span><span class="istickedoff">TopLevel decls -&gt;</span>
+<span class="lineno">  703 </span><span class="spaces">                    </span><span class="istickedoff">foldMap (foldMap namesFrom) decls</span>
+<span class="lineno">  704 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  705 </span><span class="spaces">                </span><span class="istickedoff">CommonDeclaration d -&gt;</span>
+<span class="lineno">  706 </span><span class="spaces">                    </span><span class="istickedoff">newDefinitionsAtNode (extract $ I.unFix d)</span>
+<span class="lineno">  707 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  708 </span><span class="spaces">                </span><span class="istickedoff">Definition first rest _ _ -&gt;</span>
+<span class="lineno">  709 </span><span class="spaces">                    </span><span class="istickedoff">foldMap namesFromPattern (first : fmap extract rest)</span>
+<span class="lineno">  710 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  711 </span><span class="spaces">                </span><span class="istickedoff">Lambda args _ _ _ -&gt;</span>
+<span class="lineno">  712 </span><span class="spaces">                    </span><span class="istickedoff">foldMap (namesFromPattern . extract) args</span>
+<span class="lineno">  713 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  714 </span><span class="spaces">                </span><span class="istickedoff">Let decls _ _ -&gt;</span>
+<span class="lineno">  715 </span><span class="spaces">                    </span><span class="istickedoff">foldMap namesFrom decls</span>
+<span class="lineno">  716 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  717 </span><span class="spaces">                </span><span class="istickedoff">LetCommonDeclaration d -&gt;</span>
+<span class="lineno">  718 </span><span class="spaces">                    </span><span class="istickedoff">newDefinitionsAtNode (extract $ I.unFix d)</span>
+<span class="lineno">  719 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  720 </span><span class="spaces">                </span><span class="istickedoff">CaseBranch _ _ _ p _ -&gt;</span>
+<span class="lineno">  721 </span><span class="spaces">                    </span><span class="istickedoff">namesFromPattern p</span>
+<span class="lineno">  722 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  723 </span><span class="spaces">                </span><span class="istickedoff">-- TODO: actually implement this for all node types</span>
+<span class="lineno">  724 </span><span class="spaces">                </span><span class="istickedoff">_ -&gt; []</span>
+<span class="lineno">  725 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  726 </span><span class="spaces">        </span><span class="istickedoff">step ::</span>
+<span class="lineno">  727 </span><span class="spaces">            </span><span class="istickedoff">forall kind'.</span>
+<span class="lineno">  728 </span><span class="spaces">            </span><span class="istickedoff">context</span>
+<span class="lineno">  729 </span><span class="spaces">            </span><span class="istickedoff">-&gt; AST (ns, UppercaseIdentifier) (ns, UppercaseIdentifier) (Ref ns)</span>
+<span class="lineno">  730 </span><span class="spaces">                </span><span class="istickedoff">(I.Fix ann (AST (ns, UppercaseIdentifier) (ns, UppercaseIdentifier) (Ref ns)))</span>
+<span class="lineno">  731 </span><span class="spaces">                </span><span class="istickedoff">kind'</span>
+<span class="lineno">  732 </span><span class="spaces">            </span><span class="istickedoff">-&gt; AST typeRef2 ctorRef2 varRef2</span>
+<span class="lineno">  733 </span><span class="spaces">                </span><span class="istickedoff">(Compose</span>
+<span class="lineno">  734 </span><span class="spaces">                    </span><span class="istickedoff">((,) context)</span>
+<span class="lineno">  735 </span><span class="spaces">                    </span><span class="istickedoff">(I.Fix ann (AST (ns, UppercaseIdentifier) (ns, UppercaseIdentifier) (Ref ns)))</span>
+<span class="lineno">  736 </span><span class="spaces">                </span><span class="istickedoff">)</span>
+<span class="lineno">  737 </span><span class="spaces">                </span><span class="istickedoff">kind'</span>
+<span class="lineno">  738 </span><span class="spaces">        </span><span class="istickedoff">step context node =</span>
+<span class="lineno">  739 </span><span class="spaces">            </span><span class="istickedoff">let</span>
+<span class="lineno">  740 </span><span class="spaces">                </span><span class="istickedoff">context' = foldl (flip defineLocal) context (newDefinitionsAtNode node)</span>
+<span class="lineno">  741 </span><span class="spaces">            </span><span class="istickedoff">in</span>
+<span class="lineno">  742 </span><span class="spaces">            </span><span class="istickedoff">mapAll (fType context') (fCtor context') (fVar context') id</span>
+<span class="lineno">  743 </span><span class="spaces">                </span><span class="istickedoff">$ I.imap (Compose . (,) context') node</span>
+<span class="lineno">  744 </span><span class="spaces">    </span><span class="istickedoff">in</span>
+<span class="lineno">  745 </span><span class="spaces">    </span><span class="istickedoff">I.ana</span>
+<span class="lineno">  746 </span><span class="spaces">        </span><span class="istickedoff">(\(Compose (context, ast)) -&gt; step context &lt;$&gt; I.unFix ast)</span>
+<span class="lineno">  747 </span><span class="spaces">        </span><span class="istickedoff">(Compose (initialContext, initialAst))</span></span>
+
+</pre>
+</body>
+</html>

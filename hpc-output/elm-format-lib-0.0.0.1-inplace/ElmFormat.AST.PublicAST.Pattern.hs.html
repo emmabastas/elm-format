@@ -1,0 +1,292 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="decl"><span class="nottickedoff">never executed</span> <span class="tickonlytrue">always true</span> <span class="tickonlyfalse">always false</span></span>
+</pre>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE TypeFamilies #-}
+<span class="lineno">    2 </span>{-# LANGUAGE DataKinds #-}
+<span class="lineno">    3 </span>{-# OPTIONS_GHC -Wno-orphans #-}
+<span class="lineno">    4 </span>module ElmFormat.AST.PublicAST.Pattern (Pattern(..), mkListPattern) where
+<span class="lineno">    5 </span>
+<span class="lineno">    6 </span>import ElmFormat.AST.PublicAST.Core
+<span class="lineno">    7 </span>import ElmFormat.AST.PublicAST.Reference
+<span class="lineno">    8 </span>import qualified AST.V0_16 as AST
+<span class="lineno">    9 </span>import qualified Data.Either as Either
+<span class="lineno">   10 </span>import qualified ElmFormat.AST.PublicAST.Core as Core
+<span class="lineno">   11 </span>
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>data Pattern
+<span class="lineno">   14 </span>    = AnythingPattern
+<span class="lineno">   15 </span>    | UnitPattern
+<span class="lineno">   16 </span>    | LiteralPattern LiteralValue
+<span class="lineno">   17 </span>    | VariablePattern VariableDefinition
+<span class="lineno">   18 </span>    | DataPattern
+<span class="lineno">   19 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">constructor</span></span></span> :: Reference
+<span class="lineno">   20 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">arguments</span></span></span> :: List (LocatedIfRequested Pattern) -- Non-empty
+<span class="lineno">   21 </span>        }
+<span class="lineno">   22 </span>    | TuplePattern
+<span class="lineno">   23 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">terms</span></span></span> :: List (LocatedIfRequested Pattern) -- At least two items
+<span class="lineno">   24 </span>        }
+<span class="lineno">   25 </span>    | ListPattern -- Construct with mkListPattern
+<span class="lineno">   26 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">prefix</span></span></span> :: List (LocatedIfRequested Pattern)
+<span class="lineno">   27 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">rest</span></span></span> :: Maybe (LocatedIfRequested Pattern) -- Must not be a ListPattern
+<span class="lineno">   28 </span>        }
+<span class="lineno">   29 </span>    | RecordPattern
+<span class="lineno">   30 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">fields</span></span></span> :: List VariableDefinition
+<span class="lineno">   31 </span>        }
+<span class="lineno">   32 </span>    | PatternAlias
+<span class="lineno">   33 </span>        { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">alias</span></span></span> :: VariableDefinition
+<span class="lineno">   34 </span>        , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">pattern</span></span></span> :: LocatedIfRequested Pattern
+<span class="lineno">   35 </span>        }
+<span class="lineno">   36 </span>
+<span class="lineno">   37 </span>mkListPattern :: List (LocatedIfRequested Pattern) -&gt; Maybe (LocatedIfRequested Pattern) -&gt; Pattern
+<span class="lineno">   38 </span><span class="decl"><span class="istickedoff">mkListPattern prefix rest =</span>
+<span class="lineno">   39 </span><span class="spaces">    </span><span class="istickedoff">case fmap extract rest of</span>
+<span class="lineno">   40 </span><span class="spaces">        </span><span class="istickedoff">Just (ListPattern prefix2 rest2) -&gt;</span>
+<span class="lineno">   41 </span><span class="spaces">            </span><span class="istickedoff">ListPattern (prefix ++ prefix2) rest2</span>
+<span class="lineno">   42 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   43 </span><span class="spaces">        </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">   44 </span><span class="spaces">            </span><span class="istickedoff">ListPattern prefix rest</span></span>
+<span class="lineno">   45 </span>
+<span class="lineno">   46 </span>instance ToPublicAST 'PatternNK where
+<span class="lineno">   47 </span>    type PublicAST 'PatternNK = Pattern
+<span class="lineno">   48 </span>
+<span class="lineno">   49 </span>    <span class="decl"><span class="istickedoff">fromRawAST' config = \case</span>
+<span class="lineno">   50 </span><span class="spaces">        </span><span class="istickedoff">AST.Anything -&gt;</span>
+<span class="lineno">   51 </span><span class="spaces">            </span><span class="istickedoff">AnythingPattern</span>
+<span class="lineno">   52 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   53 </span><span class="spaces">        </span><span class="istickedoff">AST.UnitPattern comments -&gt;</span>
+<span class="lineno">   54 </span><span class="spaces">            </span><span class="istickedoff">UnitPattern</span>
+<span class="lineno">   55 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   56 </span><span class="spaces">        </span><span class="istickedoff">AST.LiteralPattern lit -&gt;</span>
+<span class="lineno">   57 </span><span class="spaces">            </span><span class="istickedoff">LiteralPattern lit</span>
+<span class="lineno">   58 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   59 </span><span class="spaces">        </span><span class="istickedoff">AST.VarPattern name -&gt;</span>
+<span class="lineno">   60 </span><span class="spaces">            </span><span class="istickedoff">VariablePattern $ VariableDefinition name</span>
+<span class="lineno">   61 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   62 </span><span class="spaces">        </span><span class="istickedoff">AST.OpPattern _ -&gt;</span>
+<span class="lineno">   63 </span><span class="spaces">            </span><span class="istickedoff"><span class="nottickedoff">error &quot;PublicAST: OpPattern is not supported in Elm 0.19&quot;</span></span>
+<span class="lineno">   64 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   65 </span><span class="spaces">        </span><span class="istickedoff">AST.DataPattern (namespace, tag) args -&gt;</span>
+<span class="lineno">   66 </span><span class="spaces">            </span><span class="istickedoff">DataPattern</span>
+<span class="lineno">   67 </span><span class="spaces">                </span><span class="istickedoff">(mkReference $ TagRef namespace tag)</span>
+<span class="lineno">   68 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config . (\(C comments a) -&gt; a) &lt;$&gt; args)</span>
+<span class="lineno">   69 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   70 </span><span class="spaces">        </span><span class="istickedoff">AST.PatternParens (C (pre, post) pat) -&gt;</span>
+<span class="lineno">   71 </span><span class="spaces">            </span><span class="istickedoff">extract $ fromRawAST config pat</span>
+<span class="lineno">   72 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   73 </span><span class="spaces">        </span><span class="istickedoff">AST.TuplePattern terms -&gt;</span>
+<span class="lineno">   74 </span><span class="spaces">            </span><span class="istickedoff">TuplePattern</span>
+<span class="lineno">   75 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config . (\(C (c1, c2) a) -&gt; a) &lt;$&gt; terms)</span>
+<span class="lineno">   76 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   77 </span><span class="spaces">        </span><span class="istickedoff">AST.EmptyListPattern comments -&gt;</span>
+<span class="lineno">   78 </span><span class="spaces">            </span><span class="istickedoff">mkListPattern [] Nothing</span>
+<span class="lineno">   79 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   80 </span><span class="spaces">        </span><span class="istickedoff">AST.ListPattern terms -&gt;</span>
+<span class="lineno">   81 </span><span class="spaces">            </span><span class="istickedoff">mkListPattern</span>
+<span class="lineno">   82 </span><span class="spaces">                </span><span class="istickedoff">(fmap (fromRawAST config . (\(C comments a) -&gt; a)) terms)</span>
+<span class="lineno">   83 </span><span class="spaces">                </span><span class="istickedoff">Nothing</span>
+<span class="lineno">   84 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   85 </span><span class="spaces">        </span><span class="istickedoff">AST.ConsPattern (C firstEol first) rest -&gt;</span>
+<span class="lineno">   86 </span><span class="spaces">            </span><span class="istickedoff">let</span>
+<span class="lineno">   87 </span><span class="spaces">                </span><span class="istickedoff">first' = fromRawAST config first</span>
+<span class="lineno">   88 </span><span class="spaces">                </span><span class="istickedoff">rest' = fmap (fromRawAST config . (\(C comments a) -&gt; a)) (AST.toCommentedList rest)</span>
+<span class="lineno">   89 </span><span class="spaces">            </span><span class="istickedoff">in</span>
+<span class="lineno">   90 </span><span class="spaces">            </span><span class="istickedoff">case reverse rest' of</span>
+<span class="lineno">   91 </span><span class="spaces">                </span><span class="istickedoff">[] -&gt; <span class="nottickedoff">mkListPattern [] (Just first')</span></span>
+<span class="lineno">   92 </span><span class="spaces">                </span><span class="istickedoff">last : mid -&gt; mkListPattern (first' : reverse mid) (Just last)</span>
+<span class="lineno">   93 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   94 </span><span class="spaces">        </span><span class="istickedoff">AST.EmptyRecordPattern comment -&gt;</span>
+<span class="lineno">   95 </span><span class="spaces">            </span><span class="istickedoff">RecordPattern []</span>
+<span class="lineno">   96 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">   97 </span><span class="spaces">        </span><span class="istickedoff">AST.RecordPattern fields -&gt;</span>
+<span class="lineno">   98 </span><span class="spaces">            </span><span class="istickedoff">RecordPattern</span>
+<span class="lineno">   99 </span><span class="spaces">                </span><span class="istickedoff">(VariableDefinition . (\(C comments a) -&gt; a) &lt;$&gt; fields)</span>
+<span class="lineno">  100 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  101 </span><span class="spaces">        </span><span class="istickedoff">AST.Alias (C comments1 pat) (C comments2 name) -&gt;</span>
+<span class="lineno">  102 </span><span class="spaces">            </span><span class="istickedoff">PatternAlias</span>
+<span class="lineno">  103 </span><span class="spaces">                </span><span class="istickedoff">(VariableDefinition name)</span>
+<span class="lineno">  104 </span><span class="spaces">                </span><span class="istickedoff">(fromRawAST config pat)</span></span>
+<span class="lineno">  105 </span>
+<span class="lineno">  106 </span>instance FromPublicAST 'PatternNK where
+<span class="lineno">  107 </span>    <span class="decl"><span class="istickedoff">toRawAST' = \case</span>
+<span class="lineno">  108 </span><span class="spaces">        </span><span class="istickedoff">AnythingPattern -&gt;</span>
+<span class="lineno">  109 </span><span class="spaces">            </span><span class="istickedoff">AST.Anything</span>
+<span class="lineno">  110 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  111 </span><span class="spaces">        </span><span class="istickedoff">UnitPattern -&gt;</span>
+<span class="lineno">  112 </span><span class="spaces">            </span><span class="istickedoff">AST.UnitPattern []</span>
+<span class="lineno">  113 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  114 </span><span class="spaces">        </span><span class="istickedoff">LiteralPattern lit -&gt;</span>
+<span class="lineno">  115 </span><span class="spaces">            </span><span class="istickedoff">AST.LiteralPattern lit</span>
+<span class="lineno">  116 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  117 </span><span class="spaces">        </span><span class="istickedoff">VariablePattern (VariableDefinition name) -&gt;</span>
+<span class="lineno">  118 </span><span class="spaces">            </span><span class="istickedoff">AST.VarPattern name</span>
+<span class="lineno">  119 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  120 </span><span class="spaces">        </span><span class="istickedoff">DataPattern constructor arguments -&gt;</span>
+<span class="lineno">  121 </span><span class="spaces">            </span><span class="istickedoff">case toRef constructor of</span>
+<span class="lineno">  122 </span><span class="spaces">                </span><span class="istickedoff">TagRef ns tag -&gt;</span>
+<span class="lineno">  123 </span><span class="spaces">                    </span><span class="istickedoff">AST.DataPattern</span>
+<span class="lineno">  124 </span><span class="spaces">                        </span><span class="istickedoff">(ns, tag)</span>
+<span class="lineno">  125 </span><span class="spaces">                        </span><span class="istickedoff">(C [] . toRawAST &lt;$&gt; arguments)</span>
+<span class="lineno">  126 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  127 </span><span class="spaces">                </span><span class="istickedoff">ref -&gt;</span>
+<span class="lineno">  128 </span><span class="spaces">                    </span><span class="istickedoff"><span class="nottickedoff">error (&quot;invalid DataPattern constructor: &quot; &lt;&gt; show ref)</span></span>
+<span class="lineno">  129 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  130 </span><span class="spaces">        </span><span class="istickedoff">TuplePattern terms -&gt;</span>
+<span class="lineno">  131 </span><span class="spaces">            </span><span class="istickedoff">AST.TuplePattern</span>
+<span class="lineno">  132 </span><span class="spaces">                </span><span class="istickedoff">(C ([], []) . toRawAST &lt;$&gt; terms)</span>
+<span class="lineno">  133 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  134 </span><span class="spaces">        </span><span class="istickedoff">ListPattern [] Nothing -&gt;</span>
+<span class="lineno">  135 </span><span class="spaces">            </span><span class="istickedoff">AST.EmptyListPattern []</span>
+<span class="lineno">  136 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  137 </span><span class="spaces">        </span><span class="istickedoff">ListPattern some Nothing -&gt;</span>
+<span class="lineno">  138 </span><span class="spaces">            </span><span class="istickedoff">AST.ListPattern</span>
+<span class="lineno">  139 </span><span class="spaces">                </span><span class="istickedoff">(C ([], []) . toRawAST &lt;$&gt; some)</span>
+<span class="lineno">  140 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  141 </span><span class="spaces">        </span><span class="istickedoff">ListPattern prefix (Just rest) -&gt;</span>
+<span class="lineno">  142 </span><span class="spaces">            </span><span class="istickedoff">done $ foldr step (toRawAST rest, []) (toRawAST &lt;$&gt; prefix)</span>
+<span class="lineno">  143 </span><span class="spaces">            </span><span class="istickedoff">where</span>
+<span class="lineno">  144 </span><span class="spaces">                </span><span class="istickedoff">step next (first, rest) =</span>
+<span class="lineno">  145 </span><span class="spaces">                    </span><span class="istickedoff">(next, first : rest)</span>
+<span class="lineno">  146 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  147 </span><span class="spaces">                </span><span class="istickedoff">done (first, rest) =</span>
+<span class="lineno">  148 </span><span class="spaces">                    </span><span class="istickedoff">AST.ConsPattern</span>
+<span class="lineno">  149 </span><span class="spaces">                        </span><span class="istickedoff">(C Nothing first)</span>
+<span class="lineno">  150 </span><span class="spaces">                        </span><span class="istickedoff">(Either.fromRight <span class="nottickedoff">undefined</span> $ AST.fromCommentedList $ C ([], [], Nothing) &lt;$&gt; rest)</span>
+<span class="lineno">  151 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  152 </span><span class="spaces">        </span><span class="istickedoff">RecordPattern [] -&gt;</span>
+<span class="lineno">  153 </span><span class="spaces">            </span><span class="istickedoff">AST.EmptyRecordPattern []</span>
+<span class="lineno">  154 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  155 </span><span class="spaces">        </span><span class="istickedoff">RecordPattern some -&gt;</span>
+<span class="lineno">  156 </span><span class="spaces">            </span><span class="istickedoff">AST.RecordPattern</span>
+<span class="lineno">  157 </span><span class="spaces">                </span><span class="istickedoff">(C ([], []) . Core.name &lt;$&gt; some)</span>
+<span class="lineno">  158 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  159 </span><span class="spaces">        </span><span class="istickedoff">PatternAlias alias pattern  -&gt;</span>
+<span class="lineno">  160 </span><span class="spaces">            </span><span class="istickedoff">AST.Alias</span>
+<span class="lineno">  161 </span><span class="spaces">                </span><span class="istickedoff">(C [] $ toRawAST pattern)</span>
+<span class="lineno">  162 </span><span class="spaces">                </span><span class="istickedoff">(C [] $ Core.name alias)</span></span>
+<span class="lineno">  163 </span>
+<span class="lineno">  164 </span>
+<span class="lineno">  165 </span>instance ToJSON Pattern where
+<span class="lineno">  166 </span>    <span class="decl"><span class="nottickedoff">toJSON = undefined</span></span>
+<span class="lineno">  167 </span>    <span class="decl"><span class="istickedoff">toEncoding = pairs . toPairs</span></span>
+<span class="lineno">  168 </span>
+<span class="lineno">  169 </span>instance ToPairs Pattern where
+<span class="lineno">  170 </span>    <span class="decl"><span class="istickedoff">toPairs = \case</span>
+<span class="lineno">  171 </span><span class="spaces">        </span><span class="istickedoff">AnythingPattern -&gt;</span>
+<span class="lineno">  172 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  173 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;AnythingPattern&quot;</span>
+<span class="lineno">  174 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  175 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  176 </span><span class="spaces">        </span><span class="istickedoff">UnitPattern -&gt;</span>
+<span class="lineno">  177 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  178 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;UnitPattern&quot;</span>
+<span class="lineno">  179 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  180 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  181 </span><span class="spaces">        </span><span class="istickedoff">LiteralPattern lit -&gt;</span>
+<span class="lineno">  182 </span><span class="spaces">            </span><span class="istickedoff">toPairs lit</span>
+<span class="lineno">  183 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  184 </span><span class="spaces">        </span><span class="istickedoff">VariablePattern def -&gt;</span>
+<span class="lineno">  185 </span><span class="spaces">            </span><span class="istickedoff">toPairs def</span>
+<span class="lineno">  186 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  187 </span><span class="spaces">        </span><span class="istickedoff">DataPattern constructor arguments -&gt;</span>
+<span class="lineno">  188 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  189 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;DataPattern&quot;</span>
+<span class="lineno">  190 </span><span class="spaces">                </span><span class="istickedoff">, &quot;constructor&quot; .= constructor</span>
+<span class="lineno">  191 </span><span class="spaces">                </span><span class="istickedoff">, &quot;arguments&quot; .= arguments</span>
+<span class="lineno">  192 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  193 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  194 </span><span class="spaces">        </span><span class="istickedoff">TuplePattern terms -&gt;</span>
+<span class="lineno">  195 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  196 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;TuplePattern&quot;</span>
+<span class="lineno">  197 </span><span class="spaces">                </span><span class="istickedoff">, &quot;terms&quot; .= terms</span>
+<span class="lineno">  198 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  199 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  200 </span><span class="spaces">        </span><span class="istickedoff">ListPattern prefix rest -&gt;</span>
+<span class="lineno">  201 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  202 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;ListPattern&quot;</span>
+<span class="lineno">  203 </span><span class="spaces">                </span><span class="istickedoff">, &quot;prefix&quot; .= prefix</span>
+<span class="lineno">  204 </span><span class="spaces">                </span><span class="istickedoff">, &quot;rest&quot; .= rest</span>
+<span class="lineno">  205 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  206 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  207 </span><span class="spaces">        </span><span class="istickedoff">RecordPattern fields -&gt;</span>
+<span class="lineno">  208 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  209 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;RecordPattern&quot;</span>
+<span class="lineno">  210 </span><span class="spaces">                </span><span class="istickedoff">, &quot;fields&quot; .= fields</span>
+<span class="lineno">  211 </span><span class="spaces">                </span><span class="istickedoff">]</span>
+<span class="lineno">  212 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  213 </span><span class="spaces">        </span><span class="istickedoff">PatternAlias alias pat -&gt;</span>
+<span class="lineno">  214 </span><span class="spaces">            </span><span class="istickedoff">mconcat</span>
+<span class="lineno">  215 </span><span class="spaces">                </span><span class="istickedoff">[ type_ &quot;PatternAlias&quot;</span>
+<span class="lineno">  216 </span><span class="spaces">                </span><span class="istickedoff">, &quot;alias&quot; .= alias</span>
+<span class="lineno">  217 </span><span class="spaces">                </span><span class="istickedoff">, &quot;pattern&quot; .= pat</span>
+<span class="lineno">  218 </span><span class="spaces">                </span><span class="istickedoff">]</span></span>
+<span class="lineno">  219 </span>
+<span class="lineno">  220 </span>instance FromJSON Pattern where
+<span class="lineno">  221 </span>    <span class="decl"><span class="istickedoff">parseJSON = withObject <span class="nottickedoff">&quot;Pattern&quot;</span> $ \obj -&gt; do</span>
+<span class="lineno">  222 </span><span class="spaces">        </span><span class="istickedoff">tag &lt;- obj .: &quot;tag&quot;</span>
+<span class="lineno">  223 </span><span class="spaces">        </span><span class="istickedoff">case tag of</span>
+<span class="lineno">  224 </span><span class="spaces">            </span><span class="istickedoff">&quot;AnythingPattern&quot; -&gt;</span>
+<span class="lineno">  225 </span><span class="spaces">                </span><span class="istickedoff">return AnythingPattern</span>
+<span class="lineno">  226 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  227 </span><span class="spaces">            </span><span class="istickedoff">&quot;UnitPattern&quot; -&gt;</span>
+<span class="lineno">  228 </span><span class="spaces">                </span><span class="istickedoff">return UnitPattern</span>
+<span class="lineno">  229 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  230 </span><span class="spaces">            </span><span class="istickedoff">&quot;IntLiteral&quot; -&gt;</span>
+<span class="lineno">  231 </span><span class="spaces">                </span><span class="istickedoff">LiteralPattern &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  232 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  233 </span><span class="spaces">            </span><span class="istickedoff">&quot;FloatLiteral&quot; -&gt;</span>
+<span class="lineno">  234 </span><span class="spaces">                </span><span class="istickedoff">LiteralPattern &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  235 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  236 </span><span class="spaces">            </span><span class="istickedoff">&quot;StringLiteral&quot; -&gt;</span>
+<span class="lineno">  237 </span><span class="spaces">                </span><span class="istickedoff">LiteralPattern &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  238 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  239 </span><span class="spaces">            </span><span class="istickedoff">&quot;CharLiteral&quot; -&gt;</span>
+<span class="lineno">  240 </span><span class="spaces">                </span><span class="istickedoff">LiteralPattern &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  241 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  242 </span><span class="spaces">            </span><span class="istickedoff">&quot;VariableDefinition&quot; -&gt;</span>
+<span class="lineno">  243 </span><span class="spaces">                </span><span class="istickedoff">VariablePattern &lt;$&gt; parseJSON (Object obj)</span>
+<span class="lineno">  244 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  245 </span><span class="spaces">            </span><span class="istickedoff">&quot;DataPattern&quot; -&gt;</span>
+<span class="lineno">  246 </span><span class="spaces">                </span><span class="istickedoff">DataPattern</span>
+<span class="lineno">  247 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;constructor&quot;</span>
+<span class="lineno">  248 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;arguments&quot;</span>
+<span class="lineno">  249 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  250 </span><span class="spaces">            </span><span class="istickedoff">&quot;TuplePattern&quot; -&gt;</span>
+<span class="lineno">  251 </span><span class="spaces">                </span><span class="istickedoff">TuplePattern</span>
+<span class="lineno">  252 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;terms&quot;</span>
+<span class="lineno">  253 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  254 </span><span class="spaces">            </span><span class="istickedoff">&quot;ListPattern&quot; -&gt;</span>
+<span class="lineno">  255 </span><span class="spaces">                </span><span class="istickedoff">ListPattern</span>
+<span class="lineno">  256 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;prefix&quot;</span>
+<span class="lineno">  257 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;rest&quot;</span>
+<span class="lineno">  258 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  259 </span><span class="spaces">            </span><span class="istickedoff">&quot;RecordPattern&quot; -&gt;</span>
+<span class="lineno">  260 </span><span class="spaces">                </span><span class="istickedoff">RecordPattern</span>
+<span class="lineno">  261 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;fields&quot;</span>
+<span class="lineno">  262 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  263 </span><span class="spaces">            </span><span class="istickedoff">&quot;PatternAlias&quot; -&gt;</span>
+<span class="lineno">  264 </span><span class="spaces">                </span><span class="istickedoff">PatternAlias</span>
+<span class="lineno">  265 </span><span class="spaces">                    </span><span class="istickedoff">&lt;$&gt; obj .: &quot;alias&quot;</span>
+<span class="lineno">  266 </span><span class="spaces">                    </span><span class="istickedoff">&lt;*&gt; obj .: &quot;pattern&quot;</span>
+<span class="lineno">  267 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  268 </span><span class="spaces">            </span><span class="istickedoff">_ -&gt;</span>
+<span class="lineno">  269 </span><span class="spaces">                </span><span class="istickedoff"><span class="nottickedoff">fail (&quot;unexpected Pattern tag: &quot; &lt;&gt; tag)</span></span></span>
+
+</pre>
+</body>
+</html>
