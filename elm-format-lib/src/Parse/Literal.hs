@@ -2,9 +2,12 @@ module Parse.Literal (literal) where
 
 import Prelude hiding (exponent)
 import Data.Char (digitToInt, isSpace)
+import qualified Elm.String as ES
+import qualified Parse.Primitives as P
 import Parse.ParsecAdapter
 import Parse.Helpers (processAs, escaped, expecting, sandwich, betwixt)
 import Parse.IParser
+import Parse.String (character)
 
 import AST.V0_16
 
@@ -114,20 +117,11 @@ str =
             ]
 
 
+-- TODO: Error handling.
 chr :: IParser Char
 chr =
-    betwixt '\'' '\'' character <?> "a character"
-  where
-    nonQuote = satisfy (/='\'')
-
-    character =
-      do  c <- choice
-                [ escaped '\''
-                , (:) <$> char '\\' <*> many1 nonQuote
-                , (:[]) <$> nonQuote
-                ]
-
-          processAs charLiteral $ sandwich '\'' c
+  do  s <- character undefined undefined
+      processAs charLiteral $ sandwich '\'' (ES.toChars s)
 
 
 --
