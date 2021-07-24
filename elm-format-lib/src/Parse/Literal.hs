@@ -14,7 +14,11 @@ import AST.V0_16
 
 literal :: IParser LiteralValue
 literal =
-  num <|> (uncurry Str <$> str) <|> (Chr <$> chr)
+  P.oneOf undefined
+    [ num
+    , uncurry Str <$> str
+    , Chr <$> Parse.String.character undefined undefined
+    ]
 
 
 num :: IParser LiteralValue
@@ -116,12 +120,6 @@ str =
                 ]
             ]
 
-
--- TODO: Error handling.
-chr :: IParser Char
-chr =
-  do  s <- character undefined undefined
-      processAs charLiteral $ sandwich '\'' (ES.toChars s)
 
 
 --

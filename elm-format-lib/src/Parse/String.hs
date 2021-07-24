@@ -6,12 +6,15 @@
 module Parse.String
   ( string
   , character
+  , chompUtf8
   )
   where
 
 
+import Data.Char (chr)
 import qualified Data.Utf8 as Utf8
 import Data.Word (Word8, Word16)
+import Data.Bits (shiftL, (.|.), (.&.))
 import Foreign.Ptr (Ptr, plusPtr, minusPtr)
 
 import qualified Elm.String as ES
@@ -25,39 +28,39 @@ import qualified Reporting.Error.Syntax as E
 -- CHARACTER
 
 
-character :: (Row -> Col -> x) -> (E.Char -> Row -> Col -> x) -> Parser x ES.String
+character :: (Row -> Col -> x) -> (E.Char -> Row -> Col -> x) -> Parser x Char
 character toExpectation toError =
   P.Parser $ \(P.State src pos end indent row col nl sn) cok _ cerr eerr ->
     if pos >= end || P.unsafeIndex pos /= 0x27 {- ' -} then
       eerr row col toExpectation
 
     else
-      case chompChar (plusPtr pos 1) end row (col + 1) 0 placeholder of
-        Good newPos newCol numChars mostRecent ->
-          if numChars /= 1 then
-            cerr row col (toError (E.CharNotString (fromIntegral (newCol - col))))
-          else
-            let
-              !newState = P.State src newPos end indent row newCol nl sn
-              !char = ES.fromChunks [mostRecent]
-            in
-            cok char newState
+      case chompChar (plusPtr pos 1) end row (col + 1) of
+        CharGood newPos newCol char ->
+          let
+            !newState = P.State src newPos end indent row newCol nl sn
+          in
+          cok char newState
 
         CharEndless newCol ->
           cerr row newCol (toError E.CharEndless)
+
+        CharNotString newCol ->
+          cerr row col (toError (E.CharNotString (fromIntegral (newCol - col))))
 
         CharEscape r c escape ->
           cerr r c (toError (E.CharEscape escape))
 
 
 data CharResult
-  = Good (Ptr Word8) Col Word16 ES.Chunk
+  = CharGood (Ptr Word8) Col Char
   | CharEndless Col
+  | CharNotString Col
   | CharEscape Row Col E.Escape
 
 
-chompChar :: Ptr Word8 -> Ptr Word8 -> Row -> Col -> Word16 -> ES.Chunk -> CharResult
-chompChar pos end row col numChars mostRecent =
+chompChar :: Ptr Word8 -> Ptr Word8 -> Row -> Col -> CharResult
+chompChar pos end row col =
   if pos >= end then
     CharEndless col
 
@@ -65,35 +68,98 @@ chompChar pos end row col numChars mostRecent =
     let
       !word = P.unsafeIndex pos
     in
-      if word == 0x27 {- ' -} then
-        Good (plusPtr pos 1) (col + 1) numChars mostRecent
+    if word == 0x0A {- \n -} then
+      CharEndless col
 
-      else if word == 0x0A {- \n -} then
-        CharEndless col
+    else if word == 0x27 {- ' -} then
+      CharNotString (col + 1)
 
-      else if word == 0x22 {- " -} then
-        chompChar (plusPtr pos 1) end row (col + 1) (numChars + 1) doubleQuote
+    else if word == 0x5C {- \ -} then
+      case eatEscape (plusPtr pos 1) end row col of
+        EscapeNormal word' ->
+          finalizeChar (plusPtr pos 2) end (col + 2) (chr $ fromEnum word')
 
-      else if word == 0x5C {- \ -} then
-        case eatEscape (plusPtr pos 1) end row col of
-          EscapeNormal ->
-            chompChar (plusPtr pos 2) end row (col + 2) (numChars + 1) (ES.Slice pos 2)
+        EscapeUnicode width code ->
+          finalizeChar (plusPtr pos width) end (col + fromIntegral width) (chr code)
 
-          EscapeUnicode delta code ->
-            chompChar (plusPtr pos delta) end row (col + fromIntegral delta) (numChars + 1) (ES.CodePoint code)
+        EscapeProblem r c badEscape ->
+          CharEscape r c badEscape
 
-          EscapeProblem r c badEscape ->
-            CharEscape r c badEscape
+        EscapeEndOfFile ->
+          CharEndless col
 
-          EscapeEndOfFile ->
-            CharEndless col
+    else
+      let
+        !(char, width) = chompUtf8 pos end word
+      in
+      finalizeChar (plusPtr pos width) end (col + 1) char
 
-      else
-        let
-          !width = P.getCharWidth word
-          !newPos = plusPtr pos width
+
+finalizeChar :: Ptr Word8 -> Ptr Word8 -> Col -> Char -> CharResult
+finalizeChar pos end col char =
+  if pos >= end then
+    CharEndless col
+
+  else
+    let
+      !word = P.unsafeIndex pos
+    in
+    if word == 0x27 {- ' -} then
+      CharGood (plusPtr pos 1) (col + 1) char
+
+    else if word == 0x0A {- \n -} then
+      CharEndless col
+
+    else
+      CharNotString (col + 1)
+
+
+-- Inspired by https://hackage.haskell.org/package/utf8-string-1.0.2/docs/src/Codec.Binary.UTF8.String.html#decode
+chompUtf8 :: Ptr Word8 -> Ptr Word8 -> Word8 -> (Char, Int)
+chompUtf8 pos end word =
+  let
+    !width = P.getCharWidth word
+  in
+    if plusPtr pos width > end then
+      error "Incomplete UTF-8 codepoint at end of file."
+    else
+      case width of
+        1 -> (chr $ fromEnum w0, 1)
+        2 -> (multi1, 2)
+        3 -> (multi_byte [w1, w2] 0xf 0x800, 3)
+        4 -> (multi_byte [w1, w2, w3] 0x7 0x10000, 4)
+  where
+    w0 = P.unsafeIndex pos
+    w1 = P.unsafeIndex (plusPtr pos 1)
+    w2 = P.unsafeIndex (plusPtr pos 2)
+    w3 = P.unsafeIndex (plusPtr pos 3)
+
+    -- `Codec.Binary.UTF8.String.decode` has this special case function for
+    -- a 2 byte codepoint, why is that? Would it behave the same way if we use
+    -- the general `multi_byte` instead?
+    multi1 =
+      if w1 .&. 0xc0 == 0x80 then
+        let d = (fromEnum w0 .&. 0x1f) `shiftL` 6 .|. fromEnum (w1 .&. 0x3f)
         in
-        chompChar newPos end row (col + 1) (numChars + 1) (ES.Slice pos width)
+        if d >= 0x000080 then
+          toEnum d
+        else
+          error "invalid UTF-8"
+      else
+        error "invalid UTF-8"
+
+    multi_byte words mask overlong = aux words (fromEnum (w0 .&. mask))
+      where
+        aux [] acc
+          | overlong <= acc && acc <= 0x10ffff &&
+            (acc < 0xd800 || 0xdfff < acc)     &&
+            (acc < 0xfffe || 0xffff < acc)      = chr acc
+          | otherwise = error "invalid UTF-8"
+
+        aux (w:ws) acc
+          | w .&. 0xc0 == 0x80 = aux ws
+                               $ shiftL acc 6 .|. fromEnum (w .&. 0x3f)
+          | otherwise = error "invalid UTF-8"
 
 
 
@@ -191,7 +257,7 @@ singleString pos end row col initialPos revChunks =
 
       else if word == 0x5C {- \ -} then
         case eatEscape (plusPtr pos 1) end row col of
-          EscapeNormal ->
+          EscapeNormal _ ->
             singleString (plusPtr pos 2) end row (col + 2) initialPos revChunks
 
           EscapeUnicode delta code ->
@@ -242,7 +308,7 @@ multiString pos end row col initialPos sr sc revChunks =
 
     else if word == 0x5C {- \ -} then
       case eatEscape (plusPtr pos 1) end row col of
-        EscapeNormal ->
+        EscapeNormal _ ->
           multiString (plusPtr pos 2) end row (col + 2) initialPos sr sc revChunks
 
         EscapeUnicode delta code ->
@@ -266,7 +332,7 @@ multiString pos end row col initialPos sr sc revChunks =
 
 
 data Escape
-  = EscapeNormal
+  = EscapeNormal Word8
   | EscapeUnicode !Int !Int
   | EscapeEndOfFile
   | EscapeProblem Row Col E.Escape
@@ -279,12 +345,12 @@ eatEscape pos end row col =
 
   else
     case P.unsafeIndex pos of
-      0x6E {- n -} -> EscapeNormal
-      0x72 {- r -} -> EscapeNormal
-      0x74 {- t -} -> EscapeNormal
-      0x22 {- " -} -> EscapeNormal
-      0x27 {- ' -} -> EscapeNormal
-      0x5C {- \ -} -> EscapeNormal
+      0x6E {- n -} -> EscapeNormal 0x0A {- \n -}
+      0x72 {- r -} -> EscapeNormal 0x0D {- \r -}
+      0x74 {- t -} -> EscapeNormal 0x09 {- \t -}
+      0x22 {- " -} -> EscapeNormal 0x22 {- " -}
+      0x27 {- ' -} -> EscapeNormal 0x27 {- ' -}
+      0x5C {- \ -} -> EscapeNormal 0x5C {- \ -}
       0x75 {- u -} -> eatUnicode (plusPtr pos 1) end row col
       _            -> EscapeProblem row col E.EscapeUnknown
 
