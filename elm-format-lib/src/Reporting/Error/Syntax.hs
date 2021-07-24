@@ -480,6 +480,7 @@ data String
 
 data Escape
   = EscapeUnknown
+  | BadHexcodeFormat Word16
   | BadUnicodeFormat Word16
   | BadUnicodeCode Word16
   | BadUnicodeLength Word16 Int Int

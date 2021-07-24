@@ -79,8 +79,8 @@ chompChar pos end row col =
         EscapeNormal word' ->
           finalizeChar (plusPtr pos 2) end (col + 2) (chr $ fromEnum word')
 
-        EscapeUnicode width code ->
-          finalizeChar (plusPtr pos width) end (col + fromIntegral width) (chr code)
+        EscapeCodePoint delta code ->
+          finalizeChar (plusPtr pos delta) end (col + fromIntegral delta) (chr code)
 
         EscapeProblem r c badEscape ->
           CharEscape r c badEscape
@@ -260,7 +260,7 @@ singleString pos end row col initialPos revChunks =
           EscapeNormal _ ->
             singleString (plusPtr pos 2) end row (col + 2) initialPos revChunks
 
-          EscapeUnicode delta code ->
+          EscapeCodePoint delta code ->
             let !newPos = plusPtr pos delta in
             singleString newPos end row (col + fromIntegral delta) newPos $
               addEscape (ES.CodePoint code) initialPos pos revChunks
@@ -311,7 +311,7 @@ multiString pos end row col initialPos sr sc revChunks =
         EscapeNormal _ ->
           multiString (plusPtr pos 2) end row (col + 2) initialPos sr sc revChunks
 
-        EscapeUnicode delta code ->
+        EscapeCodePoint delta code ->
           let !newPos = plusPtr pos delta in
           multiString newPos end row (col + fromIntegral delta) newPos sr sc $
             addEscape (ES.CodePoint code) initialPos pos revChunks
@@ -333,7 +333,7 @@ multiString pos end row col initialPos sr sc revChunks =
 
 data Escape
   = EscapeNormal Word8
-  | EscapeUnicode !Int !Int
+  | EscapeCodePoint !Int !Int
   | EscapeEndOfFile
   | EscapeProblem Row Col E.Escape
 
@@ -351,8 +351,24 @@ eatEscape pos end row col =
       0x22 {- " -} -> EscapeNormal 0x22 {- " -}
       0x27 {- ' -} -> EscapeNormal 0x27 {- ' -}
       0x5C {- \ -} -> EscapeNormal 0x5C {- \ -}
+      0x78 {- x -} -> eatHex (plusPtr pos 1) end row col
       0x75 {- u -} -> eatUnicode (plusPtr pos 1) end row col
       _            -> EscapeProblem row col E.EscapeUnknown
+
+
+eatHex :: Ptr Word8 -> Ptr Word8 -> Row -> Col -> Escape
+eatHex pos end row col =
+  if pos >= end then
+    EscapeProblem row col (E.BadHexcodeFormat 2)
+  else
+    let
+      (# newPos, code #) = Number.chompHex pos end
+      !numDigits = minusPtr newPos pos
+    in
+    if newPos >= end then
+      EscapeProblem row col $ E.BadHexcodeFormat (2 + fromIntegral numDigits)
+    else
+      EscapeCodePoint (2 + numDigits) code
 
 
 eatUnicode :: Ptr Word8 -> Ptr Word8 -> Row -> Col -> Escape
@@ -379,7 +395,7 @@ eatUnicode pos end row col =
           code
 
     else
-      EscapeUnicode (numDigits + 4) code
+      EscapeCodePoint (numDigits + 4) code
 
 
 {-# NOINLINE singleQuote #-}
